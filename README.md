@@ -1,73 +1,191 @@
-# Welcome to your Lovable project
+# Ammar Resume
 
-## Project info
+A minimalist, text-first personal site for hiring and personal branding, with a simple admin dashboard.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## Tech Stack
 
-## How can I edit this code?
+- **Frontend:** React 18 + Vite + TypeScript
+- **Styling:** Tailwind CSS + shadcn/ui components
+- **Backend:** Supabase (Postgres + Auth + Storage + Edge Functions)
+- **Deployment:** AWS (S3/CloudFront or ECS) + GitHub Actions
 
-There are several ways of editing your application.
+## Features
 
-**Use Lovable**
+### Public Site
+- Minimalist, fast, responsive design
+- Home, About, Projects, Writing (external links), Contact pages
+- SEO optimized with meta tags
+- No internal blog - writing section links to external publications
+- Project images only on detail pages (max 3, captioned, lazy-loaded)
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+### Admin Dashboard
+- Protected routes with Supabase Auth
+- CRUD for Projects and Writing
+- Profile and SEO settings management
+- Theme and visibility toggles
 
-Changes made via Lovable will be committed automatically to this repo.
+## Project Structure
 
-**Use your preferred IDE**
+```
+src/
+├── components/
+│   ├── ui/              # shadcn/ui components
+│   ├── Nav.tsx          # Site navigation
+│   ├── Footer.tsx       # Site footer
+│   ├── PublicLayout.tsx # Layout wrapper for public pages
+│   └── AdminLayout.tsx  # Layout wrapper for admin pages
+├── pages/
+│   ├── Home.tsx
+│   ├── About.tsx
+│   ├── Projects.tsx
+│   ├── ProjectDetail.tsx
+│   ├── Writing.tsx
+│   ├── Contact.tsx
+│   ├── NotFound.tsx
+│   └── admin/
+│       ├── Dashboard.tsx
+│       ├── AdminProjects.tsx
+│       ├── AdminWriting.tsx
+│       └── AdminSettings.tsx
+├── hooks/               # Custom React hooks
+├── lib/                 # Utilities and helpers
+├── App.tsx              # Router configuration
+├── main.tsx             # Entry point
+└── index.css            # Design system tokens
+```
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+## Routes
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+### Public Routes
+| Path | Page | Description |
+|------|------|-------------|
+| `/` | Home | Landing page with hero and previews |
+| `/about` | About | Bio, experience, skills |
+| `/projects` | Projects | List of published projects |
+| `/projects/:slug` | ProjectDetail | Individual project page |
+| `/writing` | Writing | External article links |
+| `/contact` | Contact | Contact info and form |
 
-Follow these steps:
+### Admin Routes
+| Path | Page | Description |
+|------|------|-------------|
+| `/admin` | Dashboard | Overview and quick actions |
+| `/admin/projects` | AdminProjects | Manage projects |
+| `/admin/writing` | AdminWriting | Manage writing links |
+| `/admin/settings` | AdminSettings | Profile, SEO, theme |
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+## Local Development
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+### Prerequisites
+- Node.js 18+
+- npm or bun
 
-# Step 3: Install the necessary dependencies.
-npm i
+### Setup
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+1. Clone the repository:
+```bash
+git clone https://github.com/username/ammar-resume.git
+cd ammar-resume
+```
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+3. Create environment file:
+```bash
+cp .env.example .env
+```
+
+4. Configure environment variables:
+```
+VITE_SUPABASE_URL=your_supabase_url
+VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
+```
+
+5. Start development server:
+```bash
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+Visit `http://localhost:5173`
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## Environment Variables
 
-**Use GitHub Codespaces**
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `VITE_SUPABASE_URL` | Supabase project URL | Yes |
+| `VITE_SUPABASE_ANON_KEY` | Supabase anonymous key | Yes |
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+## Deployment
 
-## What technologies are used for this project?
+### Option A: Static Hosting (S3 + CloudFront)
 
-This project is built with:
+1. Build the project:
+```bash
+npm run build
+```
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+2. Upload `dist/` to S3 bucket
 
-## How can I deploy this project?
+3. Configure CloudFront distribution with:
+   - Origin: S3 bucket
+   - SSL certificate
+   - Custom domain
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+### Option B: Docker
 
-## Can I connect a custom domain to my Lovable project?
+1. Build Docker image:
+```bash
+docker build -t ammar-resume .
+```
 
-Yes, you can!
+2. Run container:
+```bash
+docker run -p 80:80 ammar-resume
+```
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+### Option C: GitHub Actions CI/CD
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+See `.github/workflows/deploy.yml` for automated deployment pipeline.
+
+## Supabase Setup
+
+### Required Tables
+- `profiles` - Site owner info
+- `projects` - Portfolio projects
+- `project_images` - Project images with captions
+- `writing` - External article links
+- `settings` - Site configuration
+
+### Row Level Security
+All tables have RLS enabled:
+- Public: Read published/visible content
+- Admin: Full CRUD for authenticated admin
+
+### Storage Buckets
+- `project-images` - Project screenshots (public read, auth write)
+
+## Performance Targets
+
+- Lighthouse Performance: >= 90
+- Lighthouse Accessibility: >= 90
+- Lighthouse Best Practices: >= 90
+- Lighthouse SEO: >= 90
+
+## Security Considerations
+
+- All permissions enforced via Supabase RLS
+- Frontend checks are for UX only, not security
+- No secrets in frontend code
+- Input validation with Zod
+- Sanitized user content
+
+## License
+
+MIT
+
+---
+
+See `TODO.md` for the complete implementation checklist.
