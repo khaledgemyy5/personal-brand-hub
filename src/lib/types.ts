@@ -116,7 +116,23 @@ export interface Project {
   published: boolean;
   sections_config: ProjectSectionsConfig;
   content: ProjectContent;
+  media: MediaItem[];
+  metrics: string[];
+  decision_log: DecisionLogEntry[];
   updated_at: string;
+}
+
+// Media and decision log types
+export interface MediaItem {
+  type: 'image' | 'video';
+  url: string;
+  caption?: string;
+}
+
+export interface DecisionLogEntry {
+  decision: string;
+  tradeoff: string;
+  outcome: string;
 }
 
 // -----------------------------------------------------------------------------
