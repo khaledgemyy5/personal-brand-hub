@@ -59,11 +59,13 @@ A prioritized checklist for building a minimalist personal site with admin dashb
 - [ ] SEO meta tags (title, description, OG image)
 - **Acceptance:** Dynamic content loads, Lighthouse SEO > 90
 
-### 2.2 About Page
-- [ ] Fetch full profile with bio
-- [ ] Display experience/skills (from profile or separate table)
-- [ ] Proper semantic HTML structure
-- **Acceptance:** Content editable via admin
+### 2.2 Resume Page + ATS Support
+- [ ] Single-column, text-first layout
+- [ ] Copy plain text functionality (ATS-friendly format)
+- [ ] Download PDF button (generate from data or upload)
+- [ ] Fetch resume data from profile/settings or dedicated table
+- [ ] Semantic HTML for screen readers
+- **Acceptance:** Resume parseable by ATS systems, PDF download works
 
 ### 2.3 Projects List
 - [ ] Fetch all published projects ordered by display_order

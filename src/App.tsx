@@ -10,7 +10,7 @@ import { AdminLayout } from "@/components/AdminLayout";
 
 // Public Pages
 import Home from "@/pages/Home";
-import About from "@/pages/About";
+import Resume from "@/pages/Resume";
 import Projects from "@/pages/Projects";
 import ProjectDetail from "@/pages/ProjectDetail";
 import Writing from "@/pages/Writing";
@@ -35,7 +35,7 @@ const App = () => (
           {/* Public Routes */}
           <Route element={<PublicLayout />}>
             <Route path="/" element={<Home />} />
-            <Route path="/about" element={<About />} />
+            <Route path="/resume" element={<Resume />} />
             <Route path="/projects" element={<Projects />} />
             <Route path="/projects/:slug" element={<ProjectDetail />} />
             <Route path="/writing" element={<Writing />} />
