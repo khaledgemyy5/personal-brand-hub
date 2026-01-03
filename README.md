@@ -13,7 +13,7 @@ A minimalist, text-first personal site for hiring and personal branding, with a 
 
 ### Public Site
 - Minimalist, fast, responsive design
-- Home, About, Projects, Writing (external links), Contact pages
+- Home, Resume (ATS-friendly), Projects, Writing (external links), Contact pages
 - SEO optimized with meta tags
 - No internal blog - writing section links to external publications
 - Project images only on detail pages (max 3, captioned, lazy-loaded)
@@ -36,7 +36,7 @@ src/
 │   └── AdminLayout.tsx  # Layout wrapper for admin pages
 ├── pages/
 │   ├── Home.tsx
-│   ├── About.tsx
+│   ├── Resume.tsx         # ATS-friendly resume
 │   ├── Projects.tsx
 │   ├── ProjectDetail.tsx
 │   ├── Writing.tsx
@@ -48,7 +48,10 @@ src/
 │       ├── AdminWriting.tsx
 │       └── AdminSettings.tsx
 ├── hooks/               # Custom React hooks
-├── lib/                 # Utilities and helpers
+├── lib/
+│   ├── utils.ts         # Utility functions
+│   ├── types.ts         # Shared TypeScript types
+│   └── supabaseClient.ts # Supabase browser client
 ├── App.tsx              # Router configuration
 ├── main.tsx             # Entry point
 └── index.css            # Design system tokens
@@ -60,7 +63,7 @@ src/
 | Path | Page | Description |
 |------|------|-------------|
 | `/` | Home | Landing page with hero and previews |
-| `/about` | About | Bio, experience, skills |
+| `/resume` | Resume | ATS-friendly resume with PDF download |
 | `/projects` | Projects | List of published projects |
 | `/projects/:slug` | ProjectDetail | Individual project page |
 | `/writing` | Writing | External article links |
@@ -93,18 +96,14 @@ cd ammar-resume
 npm install
 ```
 
-3. Create environment file:
+3. Create environment file with required variables:
 ```bash
-cp .env.example .env
-```
-
-4. Configure environment variables:
-```
+# .env (create in project root)
 VITE_SUPABASE_URL=your_supabase_url
 VITE_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
-5. Start development server:
+4. Start development server:
 ```bash
 npm run dev
 ```
@@ -116,7 +115,9 @@ Visit `http://localhost:5173`
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `VITE_SUPABASE_URL` | Supabase project URL | Yes |
-| `VITE_SUPABASE_ANON_KEY` | Supabase anonymous key | Yes |
+| `VITE_SUPABASE_ANON_KEY` | Supabase anonymous key (public) | Yes |
+
+> **Note:** This project is fully portable with no platform lock-in. It can be deployed to AWS (S3/CloudFront, ECS, Amplify), Vercel, Netlify, or any static hosting platform.
 
 ## Deployment
 
