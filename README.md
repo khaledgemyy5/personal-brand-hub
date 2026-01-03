@@ -153,20 +153,44 @@ See `.github/workflows/deploy.yml` for automated deployment pipeline.
 
 ## Supabase Setup
 
-### Required Tables
-- `profiles` - Site owner info
-- `projects` - Portfolio projects
-- `project_images` - Project images with captions
-- `writing` - External article links
-- `settings` - Site configuration
+### Running SQL Migrations
+
+Run these SQL files in order via the Supabase SQL Editor:
+
+1. **`docs/sql/001_init.sql`** - Creates tables and indexes
+2. **`docs/sql/002_rls.sql`** - Enables RLS and creates policies
+3. **`docs/sql/003_seed.sql`** - Inserts default site settings and demo data
+
+### Setting Admin User
+
+After running migrations:
+
+1. Create an admin user via Supabase Auth (Dashboard → Authentication → Users → Add User)
+2. Copy the user's UUID
+3. Run this SQL to grant admin access:
+
+```sql
+UPDATE site_settings 
+SET admin_user_id = 'your-actual-user-uuid' 
+WHERE id = 'a0000000-0000-0000-0000-000000000001';
+```
+
+### Tables
+
+| Table | Description |
+|-------|-------------|
+| `site_settings` | Singleton row for nav, theme, SEO config |
+| `projects` | Portfolio projects with content, media, metrics |
+| `writing_categories` | Categories for writing items |
+| `writing_items` | External article links |
+| `analytics_events` | Simple page view tracking |
 
 ### Row Level Security
-All tables have RLS enabled:
-- Public: Read published/visible content
-- Admin: Full CRUD for authenticated admin
 
-### Storage Buckets
-- `project-images` - Project screenshots (public read, auth write)
+All tables have RLS enabled:
+- **Public**: Read `site_settings`, published projects, enabled writing
+- **Public**: Insert analytics events (restricted event types)
+- **Admin**: Full CRUD (authenticated user matching `admin_user_id`)
 
 ## Performance Targets
 

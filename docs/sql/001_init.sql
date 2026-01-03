@@ -1,40 +1,26 @@
 -- =============================================================================
--- Migration 001: Schema - ENUMs and Tables
+-- Migration 001: Schema - Tables and Indexes
 -- Ammar Resume Site Database Schema
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
--- A) ENUM Types
--- -----------------------------------------------------------------------------
-
--- Project visibility status
-CREATE TYPE project_status AS ENUM ('PUBLIC', 'CONFIDENTIAL', 'CONCEPT');
-
--- Level of detail for project pages
-CREATE TYPE detail_level AS ENUM ('BRIEF', 'STANDARD', 'DEEP');
-
--- Writing item language (for display/filtering)
-CREATE TYPE writing_language AS ENUM ('AUTO', 'AR', 'EN');
-
--- -----------------------------------------------------------------------------
--- B) Tables
+-- Tables
 -- -----------------------------------------------------------------------------
 
 -- 1) site_settings (singleton row for site-wide configuration)
 CREATE TABLE site_settings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   admin_user_id uuid NOT NULL,
-  nav_config jsonb NOT NULL DEFAULT '{}'::jsonb,
-  home_sections jsonb NOT NULL DEFAULT '{}'::jsonb,
-  theme jsonb NOT NULL DEFAULT '{}'::jsonb,
-  seo jsonb NOT NULL DEFAULT '{}'::jsonb,
+  nav_config jsonb NOT NULL DEFAULT '{"links":[],"ctaButton":{"visible":false,"href":"/resume","label":"Resume"}}'::jsonb,
+  home_sections jsonb NOT NULL DEFAULT '{"sections":[]}'::jsonb,
+  theme jsonb NOT NULL DEFAULT '{"mode":"system","accentColor":"#135BEC","font":"inter"}'::jsonb,
+  seo jsonb NOT NULL DEFAULT '{"title":"Ammar Jaber","description":"Technical Product Manager (ex-LLM / Software Engineer)"}'::jsonb,
   pages jsonb NOT NULL DEFAULT '{}'::jsonb,
   updated_at timestamptz DEFAULT now()
 );
 
 COMMENT ON TABLE site_settings IS 'Singleton table for site-wide settings. Only one row should exist.';
 COMMENT ON COLUMN site_settings.admin_user_id IS 'UUID of the admin user from auth.users. Required for RLS admin checks.';
-COMMENT ON COLUMN site_settings.pages IS 'Page configs including resume PDF URL, contact visibility, etc.';
 
 -- 2) projects
 CREATE TABLE projects (
@@ -43,17 +29,23 @@ CREATE TABLE projects (
   title text NOT NULL,
   summary text NOT NULL,
   tags text[] NOT NULL DEFAULT '{}',
-  status project_status NOT NULL DEFAULT 'PUBLIC',
-  detail_level detail_level NOT NULL DEFAULT 'STANDARD',
+  status text NOT NULL CHECK (status IN ('PUBLIC', 'CONFIDENTIAL', 'CONCEPT')) DEFAULT 'PUBLIC',
+  detail_level text NOT NULL CHECK (detail_level IN ('BRIEF', 'STANDARD', 'DEEP')) DEFAULT 'STANDARD',
   featured boolean NOT NULL DEFAULT false,
   published boolean NOT NULL DEFAULT false,
   sections_config jsonb NOT NULL DEFAULT '{}'::jsonb,
   content jsonb NOT NULL DEFAULT '{}'::jsonb,
+  media jsonb NOT NULL DEFAULT '[]'::jsonb,
+  metrics jsonb NOT NULL DEFAULT '[]'::jsonb,
+  decision_log jsonb NOT NULL DEFAULT '[]'::jsonb,
   updated_at timestamptz DEFAULT now()
 );
 
-CREATE INDEX idx_projects_published ON projects(published) WHERE published = true;
-CREATE INDEX idx_projects_featured ON projects(featured) WHERE featured = true;
+COMMENT ON COLUMN projects.media IS 'Array of {type: "image"|"video", url: string, caption?: string}';
+COMMENT ON COLUMN projects.metrics IS 'Array of metric strings for display';
+COMMENT ON COLUMN projects.decision_log IS 'Array of {decision: string, tradeoff: string, outcome: string}';
+
+CREATE INDEX idx_projects_list ON projects(published, featured, updated_at DESC);
 CREATE INDEX idx_projects_slug ON projects(slug);
 
 -- 3) writing_categories
@@ -69,11 +61,11 @@ CREATE INDEX idx_writing_categories_enabled ON writing_categories(enabled, order
 -- 4) writing_items
 CREATE TABLE writing_items (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  category_id uuid REFERENCES writing_categories(id) ON DELETE CASCADE,
+  category_id uuid NULL REFERENCES writing_categories(id) ON DELETE SET NULL,
   title text NOT NULL,
   url text NOT NULL,
   platform_label text NOT NULL DEFAULT '',
-  language writing_language NOT NULL DEFAULT 'AUTO',
+  language text NOT NULL CHECK (language IN ('AUTO', 'AR', 'EN')) DEFAULT 'AUTO',
   featured boolean NOT NULL DEFAULT false,
   enabled boolean NOT NULL DEFAULT true,
   order_index int NOT NULL DEFAULT 0,
@@ -81,11 +73,10 @@ CREATE TABLE writing_items (
   show_why boolean NOT NULL DEFAULT false
 );
 
-CREATE INDEX idx_writing_items_enabled ON writing_items(enabled, order_index);
+CREATE INDEX idx_writing_items_list ON writing_items(enabled, featured, order_index);
 CREATE INDEX idx_writing_items_category ON writing_items(category_id);
-CREATE INDEX idx_writing_items_featured ON writing_items(featured) WHERE featured = true;
 
--- 5) analytics_events (optional)
+-- 5) analytics_events
 CREATE TABLE analytics_events (
   id bigserial PRIMARY KEY,
   ts timestamptz DEFAULT now(),
@@ -95,8 +86,7 @@ CREATE TABLE analytics_events (
   sid text NOT NULL
 );
 
-CREATE INDEX idx_analytics_events_ts ON analytics_events(ts DESC);
-CREATE INDEX idx_analytics_events_path ON analytics_events(path);
+CREATE INDEX idx_analytics_events_query ON analytics_events(event, ts DESC);
 
 -- -----------------------------------------------------------------------------
 -- Triggers for updated_at
