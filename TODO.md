@@ -4,9 +4,11 @@ A prioritized checklist for building a minimalist personal site with admin dashb
 
 ---
 
-## Phase 1: Supabase Schema + RLS ✅ Priority: Critical
+## Phase 1: Supabase Schema + RLS + Seed ✅ Priority: Critical
 
 ### 1.1 Enable Supabase / Lovable Cloud
+- [x] Create Supabase client (src/lib/supabaseClient.ts)
+- [x] Define TypeScript types (src/lib/types.ts)
 - [ ] Connect Supabase to project
 - [ ] Verify connection and credentials
 - **Acceptance:** Supabase dashboard accessible, env vars configured
