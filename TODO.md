@@ -14,36 +14,20 @@ A prioritized checklist for building a minimalist personal site with admin dashb
 - **Acceptance:** Supabase dashboard accessible, env vars configured
 
 ### 1.2 Create Database Schema
-- [ ] Create `profiles` table (single row for site owner)
-  - id, name, title, bio, email, location, social_links (jsonb)
-  - created_at, updated_at
-- [ ] Create `projects` table
-  - id, title, slug (unique), description, long_description
-  - tags (text[]), year, status (enum: draft/published)
-  - live_url, github_url, display_order
-  - created_at, updated_at
-- [ ] Create `project_images` table
-  - id, project_id (FK), image_url, caption (required), display_order
-  - max 3 per project (enforce in RLS or app logic)
-- [ ] Create `writing` table
-  - id, title, description, publication, external_url
-  - published_date, display_order, visible (boolean)
-  - created_at, updated_at
-- [ ] Create `settings` table
-  - id, key, value (jsonb) - for SEO, theme, toggles
-- **Acceptance:** All tables created with proper types and constraints
+- [x] Create SQL migrations (docs/sql/001_schema.sql)
+  - ENUMs: project_status, detail_level, writing_language
+  - Tables: site_settings, projects, writing_categories, writing_items, analytics_events
+- [x] Create RLS policies (docs/sql/002_rls.sql)
+  - is_admin() security definer function
+  - Public read for published/enabled content
+  - Admin write via site_settings.admin_user_id check
+- [x] Create seed data (docs/sql/003_seed.sql)
+  - Demo site_settings, projects, writing categories/items
+- [ ] Run migrations in Supabase SQL Editor
+- [ ] Set admin_user_id after creating admin user
+- **Acceptance:** All tables created, RLS enabled, seed data visible
 
-### 1.3 Row Level Security (RLS)
-- [ ] Enable RLS on ALL tables
-- [ ] Public read policies for published content
-  - projects: status = 'published'
-  - writing: visible = true
-  - profiles: always readable (single row)
-- [ ] Admin write policies (authenticated + admin role check)
-- [ ] Test RLS policies with unauthenticated requests
-- **Acceptance:** Anon users can only read public data, authenticated admin can CRUD
-
-### 1.4 Storage Setup
+### 1.3 Storage Setup
 - [ ] Create `project-images` bucket
 - [ ] Set bucket policy: public read, authenticated write
 - [ ] Configure max file size (e.g., 2MB)
