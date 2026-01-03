@@ -1,18 +1,28 @@
 // =============================================================================
 // Shared TypeScript types for the application
-// These will map to Supabase database tables once schema is created
+// Maps to Supabase database tables defined in docs/sql/
 // =============================================================================
+
+// -----------------------------------------------------------------------------
+// ENUM Types (match PostgreSQL ENUMs)
+// -----------------------------------------------------------------------------
+
+export type ProjectStatus = 'PUBLIC' | 'CONFIDENTIAL' | 'CONCEPT';
+export type DetailLevel = 'BRIEF' | 'STANDARD' | 'DEEP';
+export type WritingLanguage = 'AUTO' | 'AR' | 'EN';
 
 // -----------------------------------------------------------------------------
 // Site Settings
 // -----------------------------------------------------------------------------
 
+export interface NavLink {
+  href: string;
+  label: string;
+  visible: boolean;
+}
+
 export interface NavConfig {
-  links: Array<{
-    href: string;
-    label: string;
-    visible: boolean;
-  }>;
+  links: NavLink[];
   ctaButton?: {
     href: string;
     label: string;
@@ -22,120 +32,91 @@ export interface NavConfig {
 
 export interface HomeSectionConfig {
   id: string;
-  type: "hero" | "projects" | "writing" | "contact";
   visible: boolean;
   order: number;
-  settings?: Record<string, unknown>;
+  limit?: number;
 }
 
 export interface ThemeConfig {
-  mode: "light" | "dark" | "system";
+  mode: 'light' | 'dark' | 'system';
   accentColor?: string;
 }
 
 export interface SEOConfig {
   title: string;
   description: string;
-  ogImage?: string;
-  twitterHandle?: string;
-  canonicalUrl?: string;
+  ogImage?: string | null;
+  twitterHandle?: string | null;
+  canonicalUrl?: string | null;
 }
 
-export interface PageConfig {
-  slug: string;
-  title: string;
+export interface ResumePageConfig {
   enabled: boolean;
-  seo?: Partial<SEOConfig>;
+  pdfUrl?: string | null;
+  showCopyText?: boolean;
+  showDownload?: boolean;
+}
+
+export interface ContactPageConfig {
+  enabled: boolean;
+  showForm?: boolean;
+  email?: string;
+}
+
+export interface PagesConfig {
+  resume?: ResumePageConfig;
+  contact?: ContactPageConfig;
 }
 
 export interface SiteSettings {
   id: string;
-  navConfig: NavConfig;
-  homeSections: HomeSectionConfig[];
+  admin_user_id: string;
+  nav_config: NavConfig;
+  home_sections: { sections: HomeSectionConfig[] };
   theme: ThemeConfig;
   seo: SEOConfig;
-  pages: PageConfig[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-// -----------------------------------------------------------------------------
-// Profile / Resume
-// -----------------------------------------------------------------------------
-
-export interface SocialLink {
-  platform: string;
-  url: string;
-  visible: boolean;
-}
-
-export interface ExperienceItem {
-  company: string;
-  role: string;
-  period: string;
-  location: string;
-  bullets: string[];
-}
-
-export interface EducationItem {
-  institution: string;
-  degree: string;
-  period: string;
-  location: string;
-}
-
-export interface Profile {
-  id: string;
-  name: string;
-  title: string;
-  email: string;
-  location: string;
-  bio: string;
-  summary: string;
-  experience: ExperienceItem[];
-  education: EducationItem[];
-  skills: string[];
-  socialLinks: SocialLink[];
-  createdAt: string;
-  updatedAt: string;
+  pages: PagesConfig;
+  updated_at: string;
 }
 
 // -----------------------------------------------------------------------------
 // Projects
 // -----------------------------------------------------------------------------
 
-export type ProjectStatus = "draft" | "published";
-
-export interface ProjectSection {
-  id: string;
-  type: "text" | "image" | "gallery" | "quote";
-  content: unknown;
-  order: number;
+export interface ProjectSectionsConfig {
+  showOverview?: boolean;
+  showChallenge?: boolean;
+  showApproach?: boolean;
+  showOutcome?: boolean;
+  showImages?: boolean;
+  maxImages?: number;
 }
 
-export interface ProjectImage {
-  id: string;
-  url: string;
-  caption: string; // Required per spec
-  order: number;
+export interface ProjectContent {
+  overview?: string;
+  challenge?: string;
+  approach?: string;
+  outcome?: string;
+  note?: string;
+  links?: {
+    live?: string | null;
+    github?: string | null;
+  };
 }
 
 export interface Project {
   id: string;
-  title: string;
   slug: string;
-  description: string;
-  longDescription?: string;
+  title: string;
+  summary: string;
   tags: string[];
-  year: number;
   status: ProjectStatus;
-  liveUrl?: string;
-  githubUrl?: string;
-  displayOrder: number;
-  sectionsConfig?: ProjectSection[];
-  images: ProjectImage[]; // Max 3 per spec
-  createdAt: string;
-  updatedAt: string;
+  detail_level: DetailLevel;
+  featured: boolean;
+  published: boolean;
+  sections_config: ProjectSectionsConfig;
+  content: ProjectContent;
+  updated_at: string;
 }
 
 // -----------------------------------------------------------------------------
@@ -145,91 +126,71 @@ export interface Project {
 export interface WritingCategory {
   id: string;
   name: string;
-  slug: string;
-  description?: string;
-  order: number;
+  order_index: number;
+  enabled: boolean;
 }
 
 export interface WritingItem {
   id: string;
+  category_id: string | null;
   title: string;
-  description: string;
-  publication?: string;
-  externalUrl: string;
-  categoryId?: string;
-  publishedDate: string;
-  displayOrder: number;
-  visible: boolean;
-  createdAt: string;
-  updatedAt: string;
+  url: string;
+  platform_label: string;
+  language: WritingLanguage;
+  featured: boolean;
+  enabled: boolean;
+  order_index: number;
+  why_this_matters: string | null;
+  show_why: boolean;
+}
+
+// With joined category
+export interface WritingItemWithCategory extends WritingItem {
+  category?: WritingCategory;
 }
 
 // -----------------------------------------------------------------------------
-// Database row types (snake_case for Supabase)
+// Analytics
 // -----------------------------------------------------------------------------
 
-export interface DbProject {
+export interface AnalyticsEvent {
+  id: number;
+  ts: string;
+  event: string;
+  path: string;
+  ref: string | null;
+  sid: string;
+}
+
+// -----------------------------------------------------------------------------
+// API Response Types
+// -----------------------------------------------------------------------------
+
+export interface ApiResponse<T> {
+  data: T | null;
+  error: string | null;
+}
+
+// For public project list (minimal fields)
+export interface ProjectListItem {
   id: string;
-  title: string;
   slug: string;
-  description: string;
-  long_description?: string;
-  tags: string[];
-  year: number;
-  status: ProjectStatus;
-  live_url?: string;
-  github_url?: string;
-  display_order: number;
-  sections_config?: ProjectSection[];
-  created_at: string;
-  updated_at: string;
-}
-
-export interface DbProjectImage {
-  id: string;
-  project_id: string;
-  image_url: string;
-  caption: string;
-  display_order: number;
-}
-
-export interface DbWritingItem {
-  id: string;
   title: string;
-  description: string;
-  publication?: string;
-  external_url: string;
-  category_id?: string;
-  published_date: string;
-  display_order: number;
-  visible: boolean;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface DbProfile {
-  id: string;
-  name: string;
-  title: string;
-  email: string;
-  location: string;
-  bio: string;
   summary: string;
-  experience: ExperienceItem[];
-  education: EducationItem[];
-  skills: string[];
-  social_links: SocialLink[];
-  created_at: string;
-  updated_at: string;
+  tags: string[];
+  status: ProjectStatus;
+  featured: boolean;
 }
 
-export interface DbSiteSettings {
+// For public writing list
+export interface WritingListItem {
   id: string;
-  nav_config: NavConfig;
-  home_sections: HomeSectionConfig[];
-  theme: ThemeConfig;
-  seo: SEOConfig;
-  pages: PageConfig[];
-  created_at: string;
-  updated_at: string;
+  title: string;
+  url: string;
+  platform_label: string;
+  language: WritingLanguage;
+  featured: boolean;
+  why_this_matters: string | null;
+  show_why: boolean;
+  category_name?: string;
 }
