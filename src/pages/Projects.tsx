@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, memo, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { getPublishedProjects, trackEvent } from "@/lib/db";
 import type { ProjectListItem } from "@/lib/types";
@@ -41,9 +41,9 @@ export default function Projects() {
     return projects.filter((p) => p.tags?.includes(selectedTag));
   }, [projects, selectedTag]);
 
-  const handleProjectClick = (slug: string) => {
+  const handleProjectClick = useCallback((slug: string) => {
     trackEvent({ event: "project_view", path: `/projects/${slug}` });
-  };
+  }, []);
 
   return (
     <>
@@ -117,7 +117,7 @@ export default function Projects() {
   );
 }
 
-function ProjectItem({
+const ProjectItem = memo(function ProjectItem({
   title,
   summary,
   tags,
@@ -163,7 +163,7 @@ function ProjectItem({
       )}
     </Link>
   );
-}
+});
 
 function ProjectSkeleton() {
   return (

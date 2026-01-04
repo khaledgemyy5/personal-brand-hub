@@ -34,6 +34,44 @@ import {
 } from './runtime';
 
 // -----------------------------------------------------------------------------
+// Simple in-memory cache
+// -----------------------------------------------------------------------------
+
+interface CacheEntry<T> {
+  data: T;
+  expiry: number;
+}
+
+const cache = new Map<string, CacheEntry<unknown>>();
+const CACHE_TTL = 60 * 1000; // 60 seconds
+
+function getCached<T>(key: string): T | null {
+  const entry = cache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiry) {
+    cache.delete(key);
+    return null;
+  }
+  return entry.data as T;
+}
+
+function setCache<T>(key: string, data: T, ttl: number = CACHE_TTL): void {
+  cache.set(key, { data, expiry: Date.now() + ttl });
+}
+
+export function invalidateCache(keyPrefix?: string): void {
+  if (!keyPrefix) {
+    cache.clear();
+    return;
+  }
+  for (const key of cache.keys()) {
+    if (key.startsWith(keyPrefix)) {
+      cache.delete(key);
+    }
+  }
+}
+
+// -----------------------------------------------------------------------------
 // Helper to generate session ID for analytics
 // -----------------------------------------------------------------------------
 
@@ -99,9 +137,15 @@ function transformProject(row: Record<string, unknown>): ExtendedProject {
 // =============================================================================
 
 /**
- * Fetch site settings (singleton row)
+ * Fetch site settings (singleton row) - cached for 60s
  */
 export async function getSiteSettings(): Promise<ApiResponse<SiteSettings>> {
+  const cacheKey = 'site_settings';
+  const cached = getCached<SiteSettings>(cacheKey);
+  if (cached) {
+    return { data: cached, error: null };
+  }
+
   try {
     const { data, error } = await supabase
       .from('site_settings')
@@ -117,19 +161,30 @@ export async function getSiteSettings(): Promise<ApiResponse<SiteSettings>> {
       return { data: null, error: 'Site settings not found' };
     }
 
-    return { data: transformSiteSettings(data), error: null };
+    const settings = transformSiteSettings(data);
+    setCache(cacheKey, settings);
+    return { data: settings, error: null };
   } catch (e) {
     return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
   }
 }
 
 /**
- * Fetch published projects with optional filters
+ * Fetch published projects with optional filters - cached for 30s
  */
 export async function getPublishedProjects(options?: {
   limit?: number;
   tag?: string;
 }): Promise<ApiResponse<ProjectListItem[]>> {
+  // Cache key includes limit (tag filtering is done post-fetch)
+  const cacheKey = `published_projects_${options?.limit || 'all'}`;
+  const cached = getCached<ProjectListItem[]>(cacheKey);
+  
+  if (cached && !options?.tag) {
+    // Return cached if no tag filter
+    return { data: options?.limit ? cached.slice(0, options.limit) : cached, error: null };
+  }
+
   try {
     let query = supabase
       .from('projects')
@@ -138,7 +193,7 @@ export async function getPublishedProjects(options?: {
       .order('featured', { ascending: false })
       .order('updated_at', { ascending: false });
 
-    if (options?.limit) {
+    if (options?.limit && !options?.tag) {
       query = query.limit(options.limit);
     }
 
@@ -158,11 +213,19 @@ export async function getPublishedProjects(options?: {
       featured: row.featured,
     }));
 
+    // Cache before filtering
+    setCache(cacheKey, projects, 30 * 1000); // 30s cache
+
     // Filter by tag if specified
     if (options?.tag) {
       projects = projects.filter(p => 
         p.tags.some(t => t.toLowerCase() === options.tag!.toLowerCase())
       );
+    }
+
+    // Apply limit after tag filter
+    if (options?.limit && options?.tag) {
+      projects = projects.slice(0, options.limit);
     }
 
     return { data: projects, error: null };
@@ -198,9 +261,15 @@ export async function getProjectBySlug(slug: string): Promise<ApiResponse<Extend
 }
 
 /**
- * Fetch enabled writing categories
+ * Fetch enabled writing categories - cached for 60s
  */
 export async function getWritingCategories(): Promise<ApiResponse<WritingCategory[]>> {
+  const cacheKey = 'writing_categories';
+  const cached = getCached<WritingCategory[]>(cacheKey);
+  if (cached) {
+    return { data: cached, error: null };
+  }
+
   try {
     const { data, error } = await supabase
       .from('writing_categories')
@@ -212,7 +281,9 @@ export async function getWritingCategories(): Promise<ApiResponse<WritingCategor
       return { data: null, error: error.message };
     }
 
-    return { data: data || [], error: null };
+    const categories = data || [];
+    setCache(cacheKey, categories);
+    return { data: categories, error: null };
   } catch (e) {
     return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
   }
@@ -342,6 +413,9 @@ export async function adminUpdateSiteSettings(
       return { data: null, error: error.message };
     }
 
+    // Invalidate cache after update
+    invalidateCache('site_settings');
+
     return { data: transformSiteSettings(data), error: null };
   } catch (e) {
     return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
@@ -405,6 +479,9 @@ export async function adminUpsertProject(
       return { data: null, error: error.message };
     }
 
+    // Invalidate projects cache
+    invalidateCache('published_projects');
+
     return { data: transformProject(data), error: null };
   } catch (e) {
     return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
@@ -424,6 +501,9 @@ export async function adminDeleteProject(id: string): Promise<ApiResponse<null>>
     if (error) {
       return { data: null, error: error.message };
     }
+
+    // Invalidate projects cache
+    invalidateCache('published_projects');
 
     return { data: null, error: null };
   } catch (e) {
