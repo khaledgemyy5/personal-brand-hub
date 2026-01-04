@@ -1,131 +1,133 @@
-import { Mail, MapPin } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Mail, Linkedin, Calendar } from "lucide-react";
+import { getSiteSettings, trackEvent } from "@/lib/db";
+import type { ContactPageConfig } from "@/lib/types";
+import { Skeleton } from "@/components/ui/skeleton";
+
+interface ExtendedContactConfig extends ContactPageConfig {
+  linkedin?: string;
+  calendar?: string;
+}
 
 export default function Contact() {
+  const [loading, setLoading] = useState(true);
+  const [config, setConfig] = useState<ExtendedContactConfig | null>(null);
+
+  useEffect(() => {
+    async function loadSettings() {
+      const res = await getSiteSettings();
+      if (res.data?.pages?.contact) {
+        setConfig(res.data.pages.contact as ExtendedContactConfig);
+      }
+      setLoading(false);
+    }
+
+    loadSettings();
+    trackEvent({ event: "page_view", path: "/contact" });
+  }, []);
+
+  const handleContactClick = (method: string) => {
+    trackEvent({ event: "contact_click", path: `/contact/${method}` });
+  };
+
+  if (loading) {
+    return (
+      <div className="container-narrow section-spacing">
+        <Skeleton className="h-10 w-48 mb-4" />
+        <Skeleton className="h-5 w-96 mb-12" />
+        <div className="space-y-6">
+          <Skeleton className="h-16 w-full max-w-md" />
+          <Skeleton className="h-16 w-full max-w-md" />
+        </div>
+      </div>
+    );
+  }
+
+  const email = config?.email;
+  const linkedin = config?.linkedin;
+  const calendar = config?.calendar;
+
+  const hasAnyContact = email || linkedin || calendar;
+
   return (
     <>
       <title>Contact - Ammar</title>
-      <meta name="description" content="Get in touch with Ammar. Available for consulting, collaboration, and opportunities." />
-      
+      <meta
+        name="description"
+        content="Get in touch with Ammar. Available for consulting, collaboration, and opportunities."
+      />
+
       <div className="container-narrow section-spacing">
         <h1 className="mb-4">Contact</h1>
         <p className="text-muted-foreground mb-12">
           Have a project in mind or want to chat? Feel free to reach out.
         </p>
-        
-        <div className="grid gap-8 md:grid-cols-2">
-          {/* Contact Info */}
-          <div className="space-y-6">
-            <div className="flex items-start gap-4">
-              <Mail className="w-5 h-5 text-muted-foreground mt-0.5" />
-              <div>
-                <h3 className="font-medium mb-1">Email</h3>
-                <a 
-                  href="mailto:hello@example.com"
-                  className="text-muted-foreground hover:text-accent transition-colors"
-                >
-                  hello@example.com
-                </a>
-              </div>
-            </div>
-            
-            <div className="flex items-start gap-4">
-              <MapPin className="w-5 h-5 text-muted-foreground mt-0.5" />
-              <div>
-                <h3 className="font-medium mb-1">Location</h3>
-                <p className="text-muted-foreground">
-                  San Francisco, CA
-                </p>
-              </div>
-            </div>
-            
-            <div className="pt-4">
-              <h3 className="font-medium mb-3">Connect</h3>
-              <div className="flex items-center gap-4">
-                <a 
-                  href="https://github.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  GitHub
-                </a>
-                <a 
-                  href="https://linkedin.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  LinkedIn
-                </a>
-                <a 
-                  href="https://twitter.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  Twitter
-                </a>
-              </div>
-            </div>
-          </div>
-          
-          {/* Contact Form Placeholder */}
-          <div className="p-6 border border-border rounded-lg bg-card">
-            <h3 className="font-serif text-lg font-medium mb-4">Send a message</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Contact form will be implemented with Supabase Edge Functions for email delivery.
-            </p>
-            
-            <form className="space-y-4">
-              <div>
-                <label htmlFor="name" className="block text-sm font-medium mb-1.5">
-                  Name
-                </label>
-                <input 
-                  type="text" 
-                  id="name"
-                  className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  placeholder="Your name"
-                  disabled
-                />
-              </div>
-              
-              <div>
-                <label htmlFor="email" className="block text-sm font-medium mb-1.5">
-                  Email
-                </label>
-                <input 
-                  type="email" 
-                  id="email"
-                  className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-                  placeholder="you@example.com"
-                  disabled
-                />
-              </div>
-              
-              <div>
-                <label htmlFor="message" className="block text-sm font-medium mb-1.5">
-                  Message
-                </label>
-                <textarea 
-                  id="message"
-                  rows={4}
-                  className="w-full px-3 py-2 border border-input rounded-md bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none"
-                  placeholder="Your message..."
-                  disabled
-                />
-              </div>
-              
-              <button
-                type="button"
-                className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-md font-medium opacity-50 cursor-not-allowed"
-                disabled
+
+        {!hasAnyContact ? (
+          <p className="text-muted-foreground">
+            Contact information coming soon.
+          </p>
+        ) : (
+          <div className="space-y-6 max-w-md">
+            {email && (
+              <a
+                href={`mailto:${email}`}
+                onClick={() => handleContactClick("email")}
+                className="flex items-center gap-4 p-4 -mx-4 rounded-lg hover:bg-secondary/50 transition-colors group"
               >
-                Send message (coming soon)
-              </button>
-            </form>
+                <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center shrink-0">
+                  <Mail className="w-5 h-5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                </div>
+                <div>
+                  <h3 className="font-medium mb-0.5">Email</h3>
+                  <p className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                    {email}
+                  </p>
+                </div>
+              </a>
+            )}
+
+            {linkedin && (
+              <a
+                href={linkedin}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => handleContactClick("linkedin")}
+                className="flex items-center gap-4 p-4 -mx-4 rounded-lg hover:bg-secondary/50 transition-colors group"
+              >
+                <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center shrink-0">
+                  <Linkedin className="w-5 h-5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                </div>
+                <div>
+                  <h3 className="font-medium mb-0.5">LinkedIn</h3>
+                  <p className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                    Connect on LinkedIn
+                  </p>
+                </div>
+              </a>
+            )}
+
+            {calendar && (
+              <a
+                href={calendar}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => handleContactClick("calendar")}
+                className="flex items-center gap-4 p-4 -mx-4 rounded-lg hover:bg-secondary/50 transition-colors group"
+              >
+                <div className="w-10 h-10 rounded-full bg-secondary flex items-center justify-center shrink-0">
+                  <Calendar className="w-5 h-5 text-muted-foreground group-hover:text-foreground transition-colors" />
+                </div>
+                <div>
+                  <h3 className="font-medium mb-0.5">Schedule a call</h3>
+                  <p className="text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                    Book time on my calendar
+                  </p>
+                </div>
+              </a>
+            )}
           </div>
-        </div>
+        )}
       </div>
     </>
   );
