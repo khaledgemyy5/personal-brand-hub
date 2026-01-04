@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 // Layouts
 import { PublicLayout } from "@/components/PublicLayout";
 import { AdminLayout } from "@/components/AdminLayout";
+import { AdminGuard } from "@/components/AdminGuard";
 
 // Public Pages
 import Home from "@/pages/Home";
@@ -42,12 +43,14 @@ const App = () => (
             <Route path="/contact" element={<Contact />} />
           </Route>
 
-          {/* Admin Routes */}
-          <Route path="/admin" element={<AdminLayout />}>
-            <Route index element={<AdminDashboard />} />
-            <Route path="projects" element={<AdminProjects />} />
-            <Route path="writing" element={<AdminWriting />} />
-            <Route path="settings" element={<AdminSettings />} />
+          {/* Admin Routes - Protected */}
+          <Route path="/admin" element={<AdminGuard />}>
+            <Route element={<AdminLayout />}>
+              <Route index element={<AdminDashboard />} />
+              <Route path="projects" element={<AdminProjects />} />
+              <Route path="writing" element={<AdminWriting />} />
+              <Route path="settings" element={<AdminSettings />} />
+            </Route>
           </Route>
 
           {/* 404 */}
