@@ -4,21 +4,32 @@ import { ArrowRight, Mail, Linkedin, Calendar } from "lucide-react";
 import { getSiteSettings, getPublishedProjects, getWritingItems, trackEvent } from "@/lib/db";
 import type { SiteSettings, ProjectListItem, WritingListItem, HomeSectionConfig } from "@/lib/types";
 
+// Default home sections for fallback
+const defaultHomeSections: HomeSectionConfig[] = [
+  { id: 'hero', visible: true, order: 1 },
+  { id: 'experience_snapshot', visible: true, order: 2 },
+  { id: 'featured_projects', visible: true, order: 3 },
+  { id: 'how_i_work', visible: true, order: 4 },
+  { id: 'selected_writing_preview', visible: true, order: 5 },
+  { id: 'contact_cta', visible: true, order: 6 },
+];
+
+// Default SEO for fallback
+const defaultSeo = {
+  title: 'Ammar Jaber',
+  description: 'Technical Product Manager (ex‑LLM / Software Engineer)',
+};
+
 export default function Home() {
   const [settings, setSettings] = useState<SiteSettings | null>(null);
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [writing, setWriting] = useState<WritingListItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Get section config helper
-  const getSection = (id: string): HomeSectionConfig | undefined => {
-    return settings?.home_sections.sections.find(s => s.id === id);
-  };
-
-  // Sorted visible sections
+  // Sorted visible sections - use defaults if settings is null
   const visibleSections = useMemo(() => {
-    if (!settings) return [];
-    return settings.home_sections.sections
+    const sections = settings?.home_sections.sections ?? defaultHomeSections;
+    return sections
       .filter(s => s.visible)
       .sort((a, b) => a.order - b.order);
   }, [settings]);
@@ -27,29 +38,23 @@ export default function Home() {
     async function loadData() {
       setLoading(true);
       
-      // Load settings first
-      const settingsRes = await getSiteSettings();
+      // Load settings, projects, and writing in parallel
+      const [settingsRes, projectsRes, writingRes] = await Promise.all([
+        getSiteSettings(),
+        getPublishedProjects({ limit: 3 }),
+        getWritingItems({ featuredOnly: true, limit: 3 }),
+      ]);
+
+      // Settings will always have data now (defaults returned on error)
       const loadedSettings = settingsRes.data;
       setSettings(loadedSettings);
 
-      if (loadedSettings) {
-        // Get section limits
-        const projectSection = loadedSettings.home_sections.sections.find(s => s.id === "featured_projects");
-        const writingSection = loadedSettings.home_sections.sections.find(s => s.id === "selected_writing_preview");
-
-        // Fetch projects and writing in parallel
-        const [projectsRes, writingRes] = await Promise.all([
-          getPublishedProjects({ limit: projectSection?.limit || 3 }),
-          getWritingItems({ featuredOnly: true, limit: writingSection?.limit || 3 }),
-        ]);
-
-        // Filter to featured projects only
-        if (projectsRes.data) {
-          setProjects(projectsRes.data.filter(p => p.featured));
-        }
-        if (writingRes.data) {
-          setWriting(writingRes.data);
-        }
+      // Filter to featured projects only
+      if (projectsRes.data) {
+        setProjects(projectsRes.data.filter(p => p.featured));
+      }
+      if (writingRes.data) {
+        setWriting(writingRes.data);
       }
 
       setLoading(false);
@@ -61,13 +66,9 @@ export default function Home() {
     loadData();
   }, []);
 
-  // SEO data
-  const seoTitle = settings?.seo.title || "Home";
-  const seoDescription = settings?.seo.description || "";
-
-  // Contact data from pages config
-  const contactConfig = settings?.pages.contact;
-  const email = contactConfig?.email;
+  // SEO data with fallbacks
+  const seoTitle = settings?.seo.title || defaultSeo.title;
+  const seoDescription = settings?.seo.description || defaultSeo.description;
 
   // Render section by ID
   const renderSection = (section: HomeSectionConfig) => {

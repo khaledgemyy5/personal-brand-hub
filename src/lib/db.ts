@@ -136,8 +136,44 @@ function transformProject(row: Record<string, unknown>): ExtendedProject {
 // PUBLIC READ FUNCTIONS
 // =============================================================================
 
+// -----------------------------------------------------------------------------
+// Default site settings for fallback (no Supabase or no row)
+// -----------------------------------------------------------------------------
+
+const defaultSiteSettings: SiteSettings = {
+  id: 'default',
+  admin_user_id: '',
+  nav_config: {
+    links: [
+      { href: '/', label: 'Home', visible: true },
+      { href: '/projects', label: 'Projects', visible: true },
+      { href: '/writing', label: 'Writing', visible: true },
+      { href: '/contact', label: 'Contact', visible: true },
+    ],
+    ctaButton: { href: '/resume', label: 'Resume', visible: true },
+  },
+  home_sections: {
+    sections: [
+      { id: 'hero', visible: true, order: 1 },
+      { id: 'experience_snapshot', visible: true, order: 2 },
+      { id: 'featured_projects', visible: true, order: 3 },
+      { id: 'how_i_work', visible: true, order: 4 },
+      { id: 'selected_writing_preview', visible: true, order: 5 },
+      { id: 'contact_cta', visible: true, order: 6 },
+    ],
+  },
+  theme: { mode: 'light', accentColor: '#135BEC' },
+  seo: { title: 'Ammar Jaber', description: 'Technical Product Manager (ex‑LLM / Software Engineer)' },
+  pages: {
+    resume: { enabled: true, pdfUrl: null, showCopyText: true, showDownload: true },
+    contact: { enabled: true, email: 'ammar@example.com', showForm: false },
+  },
+  updated_at: new Date().toISOString(),
+};
+
 /**
  * Fetch site settings (singleton row) - cached for 60s
+ * Returns default settings if Supabase is unavailable or no row exists
  */
 export async function getSiteSettings(): Promise<ApiResponse<SiteSettings>> {
   const cacheKey = 'site_settings';
@@ -153,19 +189,24 @@ export async function getSiteSettings(): Promise<ApiResponse<SiteSettings>> {
       .limit(1)
       .maybeSingle();
 
-    if (error) {
-      return { data: null, error: error.message };
-    }
-
-    if (!data) {
-      return { data: null, error: 'Site settings not found' };
+    if (error || !data) {
+      // Return defaults when Supabase fails or no row exists
+      console.warn(
+        '[getSiteSettings] Returning default settings:',
+        error ? error.message : 'No site_settings row found. Configure Supabase or insert a row.'
+      );
+      setCache(cacheKey, defaultSiteSettings);
+      return { data: defaultSiteSettings, error: null };
     }
 
     const settings = transformSiteSettings(data);
     setCache(cacheKey, settings);
     return { data: settings, error: null };
   } catch (e) {
-    return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
+    // Return defaults on network/config errors
+    console.warn('[getSiteSettings] Returning default settings due to error:', e instanceof Error ? e.message : 'Unknown error');
+    setCache(cacheKey, defaultSiteSettings);
+    return { data: defaultSiteSettings, error: null };
   }
 }
 
