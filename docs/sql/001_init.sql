@@ -1,31 +1,54 @@
 -- =============================================================================
--- Migration 001: Schema - Tables, Functions, and Indexes
--- Ammar Resume Site Database Schema
--- Re-runnable: safe drops at top
+-- Ammar Resume Site - Complete Database Setup
+-- Single re-runnable script with correct dependency ordering
 -- =============================================================================
 
--- -----------------------------------------------------------------------------
--- Safe Drops (for re-runnability)
--- -----------------------------------------------------------------------------
+-- =============================================================================
+-- PHASE 1: CLEANUP (Safe drops for re-runnability)
+-- =============================================================================
+
+-- Drop policies first (they depend on functions and tables)
+DROP POLICY IF EXISTS "site_settings_public_read" ON public.site_settings;
+DROP POLICY IF EXISTS "site_settings_admin_update" ON public.site_settings;
+DROP POLICY IF EXISTS "site_settings_admin_insert" ON public.site_settings;
+
+DROP POLICY IF EXISTS "projects_public_read" ON public.projects;
+DROP POLICY IF EXISTS "projects_admin_read_all" ON public.projects;
+DROP POLICY IF EXISTS "projects_admin_insert" ON public.projects;
+DROP POLICY IF EXISTS "projects_admin_update" ON public.projects;
+DROP POLICY IF EXISTS "projects_admin_delete" ON public.projects;
+
+DROP POLICY IF EXISTS "writing_categories_public_read" ON public.writing_categories;
+DROP POLICY IF EXISTS "writing_categories_admin_read_all" ON public.writing_categories;
+DROP POLICY IF EXISTS "writing_categories_admin_insert" ON public.writing_categories;
+DROP POLICY IF EXISTS "writing_categories_admin_update" ON public.writing_categories;
+DROP POLICY IF EXISTS "writing_categories_admin_delete" ON public.writing_categories;
+
+DROP POLICY IF EXISTS "writing_items_public_read" ON public.writing_items;
+DROP POLICY IF EXISTS "writing_items_admin_read_all" ON public.writing_items;
+DROP POLICY IF EXISTS "writing_items_admin_insert" ON public.writing_items;
+DROP POLICY IF EXISTS "writing_items_admin_update" ON public.writing_items;
+DROP POLICY IF EXISTS "writing_items_admin_delete" ON public.writing_items;
+
+DROP POLICY IF EXISTS "analytics_events_public_insert" ON public.analytics_events;
+DROP POLICY IF EXISTS "analytics_events_admin_read" ON public.analytics_events;
+DROP POLICY IF EXISTS "analytics_events_admin_delete" ON public.analytics_events;
+
+-- Drop view (depends on table)
+DROP VIEW IF EXISTS public.public_site_settings;
+
+-- Drop functions
 DROP FUNCTION IF EXISTS public.is_admin();
 DROP FUNCTION IF EXISTS public.set_admin_user(uuid);
 DROP FUNCTION IF EXISTS public.set_updated_at();
-DROP VIEW IF EXISTS public.public_site_settings;
 
--- -----------------------------------------------------------------------------
--- Helper Function (no table dependencies)
--- -----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.set_updated_at()
-RETURNS TRIGGER AS $$
-BEGIN
-  NEW.updated_at = now();
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
+-- Drop triggers (before dropping tables)
+DROP TRIGGER IF EXISTS update_site_settings_updated_at ON public.site_settings;
+DROP TRIGGER IF EXISTS update_projects_updated_at ON public.projects;
 
--- -----------------------------------------------------------------------------
--- Tables
--- -----------------------------------------------------------------------------
+-- =============================================================================
+-- PHASE 2: CREATE TABLES (No dependencies)
+-- =============================================================================
 
 -- 1) site_settings (singleton row for site-wide configuration)
 CREATE TABLE IF NOT EXISTS public.site_settings (
@@ -65,9 +88,6 @@ COMMENT ON COLUMN public.projects.media IS 'Array of {type: "image"|"video", url
 COMMENT ON COLUMN public.projects.metrics IS 'Array of metric strings for display';
 COMMENT ON COLUMN public.projects.decision_log IS 'Array of {decision: string, tradeoff: string, outcome: string}';
 
-CREATE INDEX IF NOT EXISTS idx_projects_list ON public.projects(published, featured, updated_at DESC);
-CREATE INDEX IF NOT EXISTS idx_projects_slug ON public.projects(slug);
-
 -- 3) writing_categories
 CREATE TABLE IF NOT EXISTS public.writing_categories (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -75,8 +95,6 @@ CREATE TABLE IF NOT EXISTS public.writing_categories (
   order_index int NOT NULL DEFAULT 0,
   enabled boolean NOT NULL DEFAULT true
 );
-
-CREATE INDEX IF NOT EXISTS idx_writing_categories_enabled ON public.writing_categories(enabled, order_index);
 
 -- 4) writing_items
 CREATE TABLE IF NOT EXISTS public.writing_items (
@@ -93,9 +111,6 @@ CREATE TABLE IF NOT EXISTS public.writing_items (
   show_why boolean NOT NULL DEFAULT false
 );
 
-CREATE INDEX IF NOT EXISTS idx_writing_items_list ON public.writing_items(enabled, featured, order_index);
-CREATE INDEX IF NOT EXISTS idx_writing_items_category ON public.writing_items(category_id);
-
 -- 5) analytics_events
 CREATE TABLE IF NOT EXISTS public.analytics_events (
   id bigserial PRIMARY KEY,
@@ -106,24 +121,29 @@ CREATE TABLE IF NOT EXISTS public.analytics_events (
   sid text NOT NULL
 );
 
+-- =============================================================================
+-- PHASE 3: CREATE INDEXES (Tables exist)
+-- =============================================================================
+
+CREATE INDEX IF NOT EXISTS idx_projects_list ON public.projects(published, featured, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_projects_slug ON public.projects(slug);
+CREATE INDEX IF NOT EXISTS idx_writing_categories_enabled ON public.writing_categories(enabled, order_index);
+CREATE INDEX IF NOT EXISTS idx_writing_items_list ON public.writing_items(enabled, featured, order_index);
+CREATE INDEX IF NOT EXISTS idx_writing_items_category ON public.writing_items(category_id);
 CREATE INDEX IF NOT EXISTS idx_analytics_events_query ON public.analytics_events(event, ts DESC);
 
--- -----------------------------------------------------------------------------
--- Triggers for updated_at
--- -----------------------------------------------------------------------------
-DROP TRIGGER IF EXISTS update_site_settings_updated_at ON public.site_settings;
-CREATE TRIGGER update_site_settings_updated_at
-  BEFORE UPDATE ON public.site_settings
-  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+-- =============================================================================
+-- PHASE 4: CREATE HELPER FUNCTIONS (Tables exist, needed by triggers/policies)
+-- =============================================================================
 
-DROP TRIGGER IF EXISTS update_projects_updated_at ON public.projects;
-CREATE TRIGGER update_projects_updated_at
-  BEFORE UPDATE ON public.projects
-  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
-
--- -----------------------------------------------------------------------------
--- Admin Functions (AFTER site_settings exists)
--- -----------------------------------------------------------------------------
+-- Trigger function for updated_at
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
 -- Check if current user is admin (SECURITY DEFINER to avoid RLS recursion)
 CREATE OR REPLACE FUNCTION public.is_admin()
@@ -140,7 +160,7 @@ AS $$
   )
 $$;
 
--- Set admin user (run once after creating admin account)
+-- Set admin user helper (run after creating admin account)
 CREATE OR REPLACE FUNCTION public.set_admin_user(_user_id uuid)
 RETURNS void
 LANGUAGE plpgsql
@@ -150,14 +170,27 @@ AS $$
 BEGIN
   UPDATE public.site_settings SET admin_user_id = _user_id;
   IF NOT FOUND THEN
-    RAISE EXCEPTION 'No site_settings row exists. Run seed SQL first.';
+    RAISE EXCEPTION 'No site_settings row exists. Insert seed data first.';
   END IF;
 END;
 $$;
 
--- -----------------------------------------------------------------------------
--- Public View (excludes admin_user_id for anonymous access)
--- -----------------------------------------------------------------------------
+-- =============================================================================
+-- PHASE 5: CREATE TRIGGERS (Functions exist)
+-- =============================================================================
+
+CREATE TRIGGER update_site_settings_updated_at
+  BEFORE UPDATE ON public.site_settings
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+CREATE TRIGGER update_projects_updated_at
+  BEFORE UPDATE ON public.projects
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+-- =============================================================================
+-- PHASE 6: CREATE VIEW (Table exists)
+-- =============================================================================
+
 CREATE OR REPLACE VIEW public.public_site_settings AS
 SELECT
   id,
@@ -169,6 +202,118 @@ SELECT
   updated_at
 FROM public.site_settings;
 
--- Grant read access to anonymous users
+-- Grant read access
 GRANT SELECT ON public.public_site_settings TO anon;
 GRANT SELECT ON public.public_site_settings TO authenticated;
+
+-- =============================================================================
+-- PHASE 7: ENABLE RLS (Tables exist)
+-- =============================================================================
+
+ALTER TABLE public.site_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.writing_categories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.writing_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.analytics_events ENABLE ROW LEVEL SECURITY;
+
+-- =============================================================================
+-- PHASE 8: CREATE RLS POLICIES (Tables + is_admin function exist)
+-- =============================================================================
+
+-- site_settings policies
+CREATE POLICY "site_settings_public_read"
+  ON public.site_settings FOR SELECT TO anon, authenticated
+  USING (true);
+
+CREATE POLICY "site_settings_admin_update"
+  ON public.site_settings FOR UPDATE TO authenticated
+  USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+CREATE POLICY "site_settings_admin_insert"
+  ON public.site_settings FOR INSERT TO authenticated
+  WITH CHECK (public.is_admin());
+
+-- projects policies
+CREATE POLICY "projects_public_read"
+  ON public.projects FOR SELECT TO anon, authenticated
+  USING (published = true);
+
+CREATE POLICY "projects_admin_read_all"
+  ON public.projects FOR SELECT TO authenticated
+  USING (public.is_admin());
+
+CREATE POLICY "projects_admin_insert"
+  ON public.projects FOR INSERT TO authenticated
+  WITH CHECK (public.is_admin());
+
+CREATE POLICY "projects_admin_update"
+  ON public.projects FOR UPDATE TO authenticated
+  USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+CREATE POLICY "projects_admin_delete"
+  ON public.projects FOR DELETE TO authenticated
+  USING (public.is_admin());
+
+-- writing_categories policies
+CREATE POLICY "writing_categories_public_read"
+  ON public.writing_categories FOR SELECT TO anon, authenticated
+  USING (enabled = true);
+
+CREATE POLICY "writing_categories_admin_read_all"
+  ON public.writing_categories FOR SELECT TO authenticated
+  USING (public.is_admin());
+
+CREATE POLICY "writing_categories_admin_insert"
+  ON public.writing_categories FOR INSERT TO authenticated
+  WITH CHECK (public.is_admin());
+
+CREATE POLICY "writing_categories_admin_update"
+  ON public.writing_categories FOR UPDATE TO authenticated
+  USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+CREATE POLICY "writing_categories_admin_delete"
+  ON public.writing_categories FOR DELETE TO authenticated
+  USING (public.is_admin());
+
+-- writing_items policies
+CREATE POLICY "writing_items_public_read"
+  ON public.writing_items FOR SELECT TO anon, authenticated
+  USING (enabled = true);
+
+CREATE POLICY "writing_items_admin_read_all"
+  ON public.writing_items FOR SELECT TO authenticated
+  USING (public.is_admin());
+
+CREATE POLICY "writing_items_admin_insert"
+  ON public.writing_items FOR INSERT TO authenticated
+  WITH CHECK (public.is_admin());
+
+CREATE POLICY "writing_items_admin_update"
+  ON public.writing_items FOR UPDATE TO authenticated
+  USING (public.is_admin()) WITH CHECK (public.is_admin());
+
+CREATE POLICY "writing_items_admin_delete"
+  ON public.writing_items FOR DELETE TO authenticated
+  USING (public.is_admin());
+
+-- analytics_events policies
+CREATE POLICY "analytics_events_public_insert"
+  ON public.analytics_events FOR INSERT TO anon, authenticated
+  WITH CHECK (
+    event IN ('page_view', 'resume_download', 'contact_click', 'writing_click', 'project_view')
+  );
+
+CREATE POLICY "analytics_events_admin_read"
+  ON public.analytics_events FOR SELECT TO authenticated
+  USING (public.is_admin());
+
+CREATE POLICY "analytics_events_admin_delete"
+  ON public.analytics_events FOR DELETE TO authenticated
+  USING (public.is_admin());
+
+-- =============================================================================
+-- DONE! Next steps:
+-- 1. Run 003_seed.sql to insert initial data
+-- 2. Create admin user in Supabase Auth
+-- 3. Run: SELECT public.set_admin_user('your-admin-uuid');
+-- =============================================================================
