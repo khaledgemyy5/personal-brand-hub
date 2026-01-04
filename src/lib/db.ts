@@ -68,7 +68,7 @@ function transformSiteSettings(row: Record<string, unknown>): SiteSettings {
 // Transform raw DB row to typed Project
 // -----------------------------------------------------------------------------
 
-interface ExtendedProject extends Project {
+export interface ExtendedProject extends Project {
   media: MediaItem[];
   metrics: string[];
   decision_log: DecisionLogEntry[];
