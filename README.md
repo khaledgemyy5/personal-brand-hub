@@ -155,42 +155,56 @@ See `.github/workflows/deploy.yml` for automated deployment pipeline.
 
 ## Supabase Setup
 
-### Running SQL Migrations
+### Complete Setup Steps
 
-Run these SQL files in order via the Supabase SQL Editor:
+1. **Create Supabase project** at [supabase.com](https://supabase.com)
 
-1. **`docs/sql/001_init.sql`** - Creates tables and indexes
-2. **`docs/sql/002_rls.sql`** - Enables RLS and creates policies
-3. **`docs/sql/003_seed.sql`** - Inserts default site settings and demo data
+2. **Run SQL migrations** in order via Supabase SQL Editor:
+   - `docs/sql/001_init.sql` - Creates tables, indexes, and `public_site_settings` view
+   - `docs/sql/002_rls.sql` - Enables RLS and creates policies
+   - `docs/sql/003_seed.sql` - Inserts default site settings and demo data
 
-### Setting Admin User
+3. **Create admin user**:
+   - Go to Dashboard → Authentication → Users → Add User
+   - Create user with email/password
+   - Copy the user's UUID
 
-After running migrations:
+4. **Link admin user to settings**:
+   ```sql
+   SELECT set_admin_user('your-user-uuid-here');
+   ```
+   Or manually:
+   ```sql
+   UPDATE site_settings 
+   SET admin_user_id = 'your-user-uuid-here' 
+   WHERE id = 'a0000000-0000-0000-0000-000000000001';
+   ```
 
-1. Create an admin user via Supabase Auth (Dashboard → Authentication → Users → Add User)
-2. Copy the user's UUID
-3. Run this SQL to grant admin access:
+5. **Set environment variables**:
+   ```bash
+   VITE_SUPABASE_URL=https://your-project.supabase.co
+   VITE_SUPABASE_ANON_KEY=your-anon-key
+   ```
 
-```sql
-UPDATE site_settings 
-SET admin_user_id = 'your-actual-user-uuid' 
-WHERE id = 'a0000000-0000-0000-0000-000000000001';
-```
+6. **Verify setup**:
+   - Site should load without "Site settings not configured" error
+   - Admin login should work at `/admin`
 
-### Tables
+### Tables & Views
 
-| Table | Description |
-|-------|-------------|
-| `site_settings` | Singleton row for nav, theme, SEO config |
-| `projects` | Portfolio projects with content, media, metrics |
-| `writing_categories` | Categories for writing items |
-| `writing_items` | External article links |
-| `analytics_events` | Simple page view tracking |
+| Object | Type | Description |
+|--------|------|-------------|
+| `site_settings` | Table | Singleton row for nav, theme, SEO config |
+| `public_site_settings` | View | Public view excluding `admin_user_id` |
+| `projects` | Table | Portfolio projects with content, media, metrics |
+| `writing_categories` | Table | Categories for writing items |
+| `writing_items` | Table | External article links |
+| `analytics_events` | Table | Simple page view tracking |
 
 ### Row Level Security
 
 All tables have RLS enabled:
-- **Public**: Read `site_settings`, published projects, enabled writing
+- **Public**: Read `public_site_settings` view, published projects, enabled writing
 - **Public**: Insert analytics events (restricted event types)
 - **Admin**: Full CRUD (authenticated user matching `admin_user_id`)
 

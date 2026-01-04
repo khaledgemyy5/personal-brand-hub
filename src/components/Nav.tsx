@@ -3,6 +3,16 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { NavConfig } from "@/lib/types";
 
+// Default links fallback
+const defaultLinks = [
+  { href: '/', label: 'Home', visible: true },
+  { href: '/projects', label: 'Projects', visible: true },
+  { href: '/writing', label: 'Writing', visible: true },
+  { href: '/contact', label: 'Contact', visible: true },
+];
+
+const defaultCtaButton = { href: '/resume', label: 'Resume', visible: true };
+
 interface NavProps {
   navConfig: NavConfig | null;
   hasProjects: boolean | null;
@@ -11,17 +21,20 @@ interface NavProps {
 
 export function Nav({ navConfig, hasProjects, hasWriting }: NavProps) {
   const location = useLocation();
-  const isLoading = navConfig === null || hasProjects === null || hasWriting === null;
+  const isLoading = navConfig === null && hasProjects === null && hasWriting === null;
 
-  // Filter visible links based on nav_config and content availability
-  const visibleLinks = navConfig?.links.filter((link) => {
+  // Use provided config or defaults
+  const links = navConfig?.links ?? defaultLinks;
+  const ctaButton = navConfig?.ctaButton ?? defaultCtaButton;
+
+  // Filter visible links based on config and content availability
+  const visibleLinks = links.filter((link) => {
     if (!link.visible) return false;
     if (link.href === "/projects" && hasProjects === false) return false;
     if (link.href === "/writing" && hasWriting === false) return false;
     return true;
-  }) ?? [];
+  });
 
-  const ctaButton = navConfig?.ctaButton;
   const showCta = ctaButton?.visible && ctaButton?.href && ctaButton?.label;
 
   return (
