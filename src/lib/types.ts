@@ -94,6 +94,14 @@ export interface ProjectSectionsConfig {
 
 export interface ProjectContent {
   overview?: string;
+  context?: string;
+  problem?: string;
+  your_role?: string;
+  constraints?: string;
+  approach_decisions?: string;
+  execution?: string;
+  impact?: string;
+  learnings?: string;
   challenge?: string;
   approach?: string;
   outcome?: string;
@@ -101,6 +109,7 @@ export interface ProjectContent {
   links?: {
     live?: string | null;
     github?: string | null;
+    related_slugs?: string[];
   };
 }
 
