@@ -54,6 +54,8 @@
     /* Typography */
     --font-serif: 'IBM Plex Serif', Georgia, 'Times New Roman', serif;
     --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-system: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-body: var(--font-sans);
 
     /* Sidebar */
     --sidebar-background: 220 15% 97%;
@@ -120,7 +122,18 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: var(--font-sans);
+    font-family: var(--font-body);
+  }
+
+  /* Font variants for dynamic switching */
+  body.font-inter {
+    --font-body: var(--font-sans);
+  }
+  body.font-ibm-plex-serif {
+    --font-body: var(--font-serif);
+  }
+  body.font-system {
+    --font-body: var(--font-system);
   }
 
   /* Typography scale */

@@ -35,11 +35,15 @@ export interface HomeSectionConfig {
   visible: boolean;
   order: number;
   limit?: number;
+  title?: string;
 }
+
+export type FontOption = 'inter' | 'ibm-plex-serif' | 'system';
 
 export interface ThemeConfig {
   mode: 'light' | 'dark' | 'system';
   accentColor?: string;
+  font?: FontOption;
 }
 
 export interface SEOConfig {
@@ -48,6 +52,7 @@ export interface SEOConfig {
   ogImage?: string | null;
   twitterHandle?: string | null;
   canonicalUrl?: string | null;
+  faviconUrl?: string | null;
 }
 
 export interface ResumePageConfig {
@@ -61,6 +66,8 @@ export interface ContactPageConfig {
   enabled: boolean;
   showForm?: boolean;
   email?: string;
+  linkedin?: string;
+  calendar?: string;
 }
 
 export interface PagesConfig {
