@@ -51,6 +51,7 @@ src/
 ├── lib/
 │   ├── utils.ts         # Utility functions
 │   ├── types.ts         # Shared TypeScript types
+│   ├── security.ts      # Input sanitization and validation
 │   └── supabaseClient.ts # Supabase browser client
 ├── App.tsx              # Router configuration
 ├── main.tsx             # Entry point
@@ -73,6 +74,7 @@ src/
 | Path | Page | Description |
 |------|------|-------------|
 | `/admin` | Dashboard | Overview and quick actions |
+| `/admin/analytics` | Analytics | Page views and event tracking |
 | `/admin/projects` | AdminProjects | Manage projects |
 | `/admin/writing` | AdminWriting | Manage writing links |
 | `/admin/settings` | AdminSettings | Profile, SEO, theme |
@@ -199,13 +201,109 @@ All tables have RLS enabled:
 - Lighthouse Best Practices: >= 90
 - Lighthouse SEO: >= 90
 
-## Security Considerations
+---
 
-- All permissions enforced via Supabase RLS
-- Frontend checks are for UX only, not security
-- No secrets in frontend code
-- Input validation with Zod
-- Sanitized user content
+## Security
+
+### Important: RLS is the Real Security Boundary
+
+**Frontend checks are for UX only - never for security.**
+
+All actual security is enforced via Supabase Row Level Security (RLS) policies. The frontend performs validation to improve user experience, but malicious users can bypass frontend code entirely. Always assume:
+
+1. Any data exposed without RLS can be read by anyone
+2. Any mutation without RLS can be performed by anyone
+3. Frontend authentication checks prevent accidental access, not attacks
+
+### Rotating the Anon Key
+
+If your `VITE_SUPABASE_ANON_KEY` is compromised:
+
+1. Go to Supabase Dashboard → Settings → API
+2. Click "Rotate" next to the anon key
+3. Update `VITE_SUPABASE_ANON_KEY` in your environment/deployment
+4. Redeploy your application
+5. The old key will stop working immediately
+
+**Note:** The anon key is public by design - it only grants access to what RLS policies allow. Rotating is only necessary if you've accidentally exposed data via misconfigured RLS.
+
+### Storage Bucket Security
+
+#### Public Bucket (e.g., `assets`)
+For publicly accessible files like images, favicons, PDFs:
+
+```sql
+-- Create public bucket
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('assets', 'assets', true);
+
+-- Allow public read
+CREATE POLICY "Public read assets"
+ON storage.objects FOR SELECT
+TO public
+USING (bucket_id = 'assets');
+
+-- Only admin can upload/delete
+CREATE POLICY "Admin upload assets"
+ON storage.objects FOR INSERT
+TO authenticated
+WITH CHECK (
+  bucket_id = 'assets' 
+  AND auth.uid() = (SELECT admin_user_id FROM site_settings LIMIT 1)
+);
+
+CREATE POLICY "Admin delete assets"
+ON storage.objects FOR DELETE
+TO authenticated
+USING (
+  bucket_id = 'assets' 
+  AND auth.uid() = (SELECT admin_user_id FROM site_settings LIMIT 1)
+);
+```
+
+#### Private Bucket (e.g., `private-docs`)
+For sensitive files only the admin should access:
+
+```sql
+-- Create private bucket
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('private-docs', 'private-docs', false);
+
+-- Only admin can read/write
+CREATE POLICY "Admin only private-docs"
+ON storage.objects
+TO authenticated
+USING (
+  bucket_id = 'private-docs' 
+  AND auth.uid() = (SELECT admin_user_id FROM site_settings LIMIT 1)
+)
+WITH CHECK (
+  bucket_id = 'private-docs' 
+  AND auth.uid() = (SELECT admin_user_id FROM site_settings LIMIT 1)
+);
+```
+
+### Input Validation
+
+All admin forms include:
+- Required field validation
+- Length limits (see `src/lib/security.ts` for `INPUT_LIMITS`)
+- URL format validation
+- Error message sanitization (prevents leaking secrets)
+
+### External Links
+
+All external links use `rel="noopener noreferrer"` to prevent:
+- Tab-nabbing attacks
+- Referrer leakage
+
+### Content Security
+
+- No `dangerouslySetInnerHTML` with user content
+- All text content is rendered as text nodes (auto-escaped)
+- URLs are validated before use
+
+---
 
 ## License
 

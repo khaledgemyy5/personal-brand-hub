@@ -59,6 +59,7 @@ import {
   adminUpdateSiteSettings,
 } from "@/lib/db";
 import type { WritingCategory, WritingItemWithCategory, WritingLanguage, WritingPageConfig } from "@/lib/types";
+import { safeText, isValidUrl, INPUT_LIMITS, sanitizeErrorMessage } from "@/lib/security";
 
 export default function AdminWriting() {
   const queryClient = useQueryClient();
@@ -477,8 +478,23 @@ function ItemsSection({
   };
 
   const handleSubmit = () => {
-    if (!form.title.trim() || !form.url.trim()) {
-      toast.error("Title and URL are required");
+    const title = safeText(form.title, INPUT_LIMITS.title);
+    const url = safeText(form.url, INPUT_LIMITS.url);
+
+    if (!title) {
+      toast.error("Title is required");
+      return;
+    }
+    if (!url) {
+      toast.error("URL is required");
+      return;
+    }
+    if (!isValidUrl(url)) {
+      toast.error("URL must be a valid link");
+      return;
+    }
+    if (form.platform_label && form.platform_label.length > INPUT_LIMITS.label) {
+      toast.error(`Platform label must be ${INPUT_LIMITS.label} characters or less`);
       return;
     }
     upsertMutation.mutate(form);
