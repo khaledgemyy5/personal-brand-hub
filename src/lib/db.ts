@@ -87,12 +87,13 @@ function getSessionId(): string {
 
 // -----------------------------------------------------------------------------
 // Transform raw DB row to typed SiteSettings
+// Works with public_site_settings view (no admin_user_id)
 // -----------------------------------------------------------------------------
 
 function transformSiteSettings(row: Record<string, unknown>): SiteSettings {
   return {
     id: row.id as string,
-    admin_user_id: row.admin_user_id as string,
+    admin_user_id: (row.admin_user_id as string) ?? '',
     nav_config: parseNavConfig(row.nav_config),
     home_sections: parseHomeSections(row.home_sections),
     theme: parseThemeConfig(row.theme),
@@ -172,8 +173,8 @@ const defaultSiteSettings: SiteSettings = {
 };
 
 /**
- * Fetch site settings (singleton row) - cached for 60s
- * Returns default settings if Supabase is unavailable or no row exists
+ * Fetch site settings from public_site_settings view - cached for 60s
+ * Returns error if Supabase is unavailable or no row exists (no silent fallback)
  */
 export async function getSiteSettings(): Promise<ApiResponse<SiteSettings>> {
   const cacheKey = 'site_settings';
@@ -184,29 +185,27 @@ export async function getSiteSettings(): Promise<ApiResponse<SiteSettings>> {
 
   try {
     const { data, error } = await supabase
-      .from('site_settings')
+      .from('public_site_settings')
       .select('*')
       .limit(1)
-      .maybeSingle();
+      .single();
 
-    if (error || !data) {
-      // Return defaults when Supabase fails or no row exists
-      console.warn(
-        '[getSiteSettings] Returning default settings:',
-        error ? error.message : 'No site_settings row found. Configure Supabase or insert a row.'
-      );
-      setCache(cacheKey, defaultSiteSettings);
-      return { data: defaultSiteSettings, error: null };
+    if (error) {
+      console.warn('[getSiteSettings] Query failed:', error.message);
+      return { data: null, error: 'Site settings not configured. Check Supabase env vars + seed.' };
+    }
+
+    if (!data) {
+      console.warn('[getSiteSettings] No site_settings row found.');
+      return { data: null, error: 'No site_settings row found. Run seed SQL.' };
     }
 
     const settings = transformSiteSettings(data);
     setCache(cacheKey, settings);
     return { data: settings, error: null };
   } catch (e) {
-    // Return defaults on network/config errors
-    console.warn('[getSiteSettings] Returning default settings due to error:', e instanceof Error ? e.message : 'Unknown error');
-    setCache(cacheKey, defaultSiteSettings);
-    return { data: defaultSiteSettings, error: null };
+    console.warn('[getSiteSettings] Error:', e instanceof Error ? e.message : 'Unknown error');
+    return { data: null, error: 'Failed to load site settings. Check Supabase connection.' };
   }
 }
 
