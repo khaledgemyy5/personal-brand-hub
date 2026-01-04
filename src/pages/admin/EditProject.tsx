@@ -30,6 +30,7 @@ import {
 
 import { adminListProjects, adminUpsertProject, adminDeleteProject, ExtendedProject } from "@/lib/db";
 import type { ProjectStatus, DetailLevel, MediaItem, DecisionLogEntry, ProjectContent, ProjectSectionsConfig } from "@/lib/types";
+import { safeText, safeSlug, isValidUrl, INPUT_LIMITS, sanitizeErrorMessage } from "@/lib/security";
 
 // Default empty project
 const defaultProject: Omit<ExtendedProject, "id" | "updated_at"> = {
@@ -143,7 +144,7 @@ export default function EditProject() {
       }
     },
     onError: (error: Error) => {
-      toast.error(error.message);
+      toast.error(sanitizeErrorMessage(error));
     },
   });
 
@@ -160,20 +161,51 @@ export default function EditProject() {
       navigate("/admin/projects");
     },
     onError: (error: Error) => {
-      toast.error(error.message);
+      toast.error(sanitizeErrorMessage(error));
     },
   });
 
-  // Validation
+  // Validation with security checks
   const validate = (): boolean => {
-    if (!form.slug.trim()) {
-      toast.error("Slug is required");
+    const slug = safeSlug(form.slug, INPUT_LIMITS.slug);
+    const title = safeText(form.title, INPUT_LIMITS.title);
+
+    if (!slug) {
+      toast.error("Slug is required (letters, numbers, hyphens only)");
       return false;
     }
-    if (!form.title.trim()) {
+    if (!title) {
       toast.error("Title is required");
       return false;
     }
+    if (form.summary && form.summary.length > INPUT_LIMITS.summary) {
+      toast.error(`Summary must be ${INPUT_LIMITS.summary} characters or less`);
+      return false;
+    }
+
+    // Validate URLs if provided
+    const links = form.content.links;
+    if (links?.live && !isValidUrl(links.live)) {
+      toast.error("Live URL is not valid");
+      return false;
+    }
+    if (links?.github && !isValidUrl(links.github)) {
+      toast.error("GitHub URL is not valid");
+      return false;
+    }
+
+    // Validate media URLs
+    for (const media of form.media) {
+      if (media.url && !isValidUrl(media.url)) {
+        toast.error("Media URL is not valid");
+        return false;
+      }
+      if (!media.caption?.trim()) {
+        toast.error("All media items require a caption");
+        return false;
+      }
+    }
+
     return true;
   };
 
@@ -307,12 +339,16 @@ export default function EditProject() {
 
         <div className="flex items-center gap-2">
           {!isNew && form.slug && (
-            <Link to={`/projects/${form.slug}`} target="_blank">
+            <a
+              href={`/projects/${form.slug}`}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
               <Button variant="outline" size="sm">
                 <ExternalLink className="w-4 h-4 mr-2" />
                 Preview
               </Button>
-            </Link>
+            </a>
           )}
           <Button onClick={handleSave} disabled={saveMutation.isPending}>
             {saveMutation.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}

@@ -32,16 +32,7 @@ import {
 } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
 
-// Simple URL validation
-function isValidUrl(str: string): boolean {
-  if (!str) return true;
-  try {
-    new URL(str);
-    return true;
-  } catch {
-    return false;
-  }
-}
+import { isValidUrl, safeText, INPUT_LIMITS, sanitizeErrorMessage } from "@/lib/security";
 
 export default function AdminSettings() {
   const { toast } = useToast();
@@ -86,7 +77,7 @@ export default function AdminSettings() {
     if (res.error) {
       toast({
         title: "Error saving settings",
-        description: res.error,
+        description: sanitizeErrorMessage(res.error),
         variant: "destructive",
       });
     } else {
@@ -131,7 +122,7 @@ export default function AdminSettings() {
     if (error) {
       toast({
         title: "Upload failed",
-        description: error.message,
+        description: sanitizeErrorMessage(error),
         variant: "destructive",
       });
       setUploading(false);
