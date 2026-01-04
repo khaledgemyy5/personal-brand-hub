@@ -5,11 +5,13 @@ import {
   FileText, 
   Settings, 
   ArrowLeft,
-  LogOut
+  LogOut,
+  BarChart3,
 } from "lucide-react";
 
 const adminLinks = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/admin/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/admin/projects", label: "Projects", icon: FolderOpen },
   { href: "/admin/writing", label: "Writing", icon: FileText },
   { href: "/admin/settings", label: "Settings", icon: Settings },
