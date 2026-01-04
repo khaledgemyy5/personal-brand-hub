@@ -70,9 +70,17 @@ export interface ContactPageConfig {
   calendar?: string;
 }
 
+export interface WritingPageConfig {
+  enabled: boolean;
+  title?: string;
+  intro?: string;
+  autoHideIfEmpty?: boolean;
+}
+
 export interface PagesConfig {
   resume?: ResumePageConfig;
   contact?: ContactPageConfig;
+  writing?: WritingPageConfig;
 }
 
 export interface SiteSettings {

@@ -179,6 +179,15 @@ export function parsePagesConfig(raw: unknown): PagesConfig {
       email: isString(obj.contact.email) ? obj.contact.email : undefined,
     };
   }
+
+  if (isObject(obj.writing)) {
+    pages.writing = {
+      enabled: isBoolean(obj.writing.enabled) ? obj.writing.enabled : true,
+      title: isString(obj.writing.title) ? obj.writing.title : undefined,
+      intro: isString(obj.writing.intro) ? obj.writing.intro : undefined,
+      autoHideIfEmpty: isBoolean(obj.writing.autoHideIfEmpty) ? obj.writing.autoHideIfEmpty : undefined,
+    };
+  }
   
   return pages;
 }
