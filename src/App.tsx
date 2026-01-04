@@ -21,6 +21,7 @@ import NotFound from "@/pages/NotFound";
 // Admin Pages
 import AdminDashboard from "@/pages/admin/Dashboard";
 import AdminProjects from "@/pages/admin/AdminProjects";
+import EditProject from "@/pages/admin/EditProject";
 import AdminWriting from "@/pages/admin/AdminWriting";
 import AdminSettings from "@/pages/admin/AdminSettings";
 
@@ -48,6 +49,7 @@ const App = () => (
             <Route element={<AdminLayout />}>
               <Route index element={<AdminDashboard />} />
               <Route path="projects" element={<AdminProjects />} />
+              <Route path="projects/:slug/edit" element={<EditProject />} />
               <Route path="writing" element={<AdminWriting />} />
               <Route path="settings" element={<AdminSettings />} />
             </Route>
