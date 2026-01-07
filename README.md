@@ -72,6 +72,7 @@ In Supabase Dashboard → Authentication → Users → Add User (email/password)
 
 - **Frontend:** React 18 + Vite + TypeScript + Tailwind CSS + shadcn/ui
 - **Backend:** Supabase (Postgres + Auth + Storage)
+- **Testing:** Vitest (unit tests), smoke test script
 - **Deployment:** AWS (S3/CloudFront) or any static host
 
 ## Features
@@ -81,6 +82,42 @@ In Supabase Dashboard → Authentication → Users → Add User (email/password)
 - **Security:** RLS on all tables, secure bootstrap mechanism
 - **Fallback:** Graceful defaults if Supabase unavailable
 - **No Lock-in:** Works anywhere, deploy to AWS/Vercel/Netlify
+
+## Testing
+
+### Run All Tests
+
+```bash
+# Type checking
+npx tsc --noEmit
+
+# Linting
+npx eslint src/
+
+# Unit tests (security helpers)
+npx vitest run
+
+# Unit tests (watch mode)
+npx vitest
+
+# Smoke tests (requires running dev server)
+npm run dev &
+node scripts/smoke-test.mjs http://localhost:8080
+```
+
+### Test Coverage
+
+| Category | What's Tested |
+|----------|---------------|
+| `security.test.ts` | URL validation, text sanitization, email validation, error sanitization |
+| `smoke-test.mjs` | Page loads (/, /projects, /writing, /admin), 404 handling |
+
+### CI Commands
+
+```bash
+# Full verification pipeline
+npx tsc --noEmit && npx eslint src/ && npx vitest run
+```
 
 ## Project Structure
 
