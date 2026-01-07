@@ -1,15 +1,15 @@
 import { useEffect, useState } from "react";
-import { Outlet, Link } from "react-router-dom";
-import { getSupabase, supabaseReady } from "@/lib/supabaseClient";
+import { Outlet, Link, useNavigate } from "react-router-dom";
+import { getSupabase, isSupabaseConfigured } from "@/lib/supabaseClient";
 import { checkIsAdmin, signInWithEmail, signOut } from "@/lib/adminAuth";
 import type { User, Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, LogOut, AlertTriangle, CheckCircle, XCircle, ArrowLeft, Key } from "lucide-react";
+import { Loader2, LogOut, AlertTriangle, CheckCircle, XCircle, ArrowLeft, Key, Lock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
-// Status icon component (module-level to avoid ref warnings)
+// Status icon component
 const StatusIcon = ({ ok }: { ok: boolean }) => {
   if (ok) {
     return <CheckCircle className="w-4 h-4 text-green-600" />;
@@ -17,33 +17,71 @@ const StatusIcon = ({ ok }: { ok: boolean }) => {
   return <XCircle className="w-4 h-4 text-red-500" />;
 };
 
+type SchemaStatus = "checking" | "missing" | "ready" | "error";
+
 export function AdminGuard() {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
-  const [needsSetup, setNeedsSetup] = useState(false);
+  const [schemaStatus, setSchemaStatus] = useState<SchemaStatus>("checking");
   const [isBootstrapped, setIsBootstrapped] = useState<boolean | null>(null);
 
   useEffect(() => {
-    const supabase = getSupabase();
-    
-    // If Supabase not configured, show setup
-    if (!supabase) {
-      setNeedsSetup(true);
+    // If env vars missing, show setup immediately
+    if (!isSupabaseConfigured) {
+      setSchemaStatus("missing");
       setLoading(false);
       return;
     }
 
+    const supabase = getSupabase();
+    if (!supabase) {
+      setSchemaStatus("missing");
+      setLoading(false);
+      return;
+    }
+
+    // Check schema by querying site_settings
+    const checkSchema = async () => {
+      try {
+        const { error } = await supabase
+          .from('site_settings')
+          .select('id')
+          .limit(1);
+        
+        if (error) {
+          // Check if it's a "relation does not exist" error
+          if (error.message.includes('does not exist') || error.code === '42P01') {
+            setSchemaStatus("missing");
+            return false;
+          }
+          // Other errors (RLS, etc) mean schema exists
+          setSchemaStatus("ready");
+          return true;
+        }
+        
+        setSchemaStatus("ready");
+        return true;
+      } catch {
+        setSchemaStatus("error");
+        return false;
+      }
+    };
+
     // Check if site is bootstrapped
     const checkBootstrap = async () => {
-      const { data } = await supabase
-        .from('public_site_settings')
-        .select('is_bootstrapped')
-        .limit(1)
-        .maybeSingle();
-      
-      setIsBootstrapped(data?.is_bootstrapped ?? false);
+      try {
+        const { data } = await supabase
+          .from('public_site_settings')
+          .select('is_bootstrapped')
+          .limit(1)
+          .maybeSingle();
+        
+        setIsBootstrapped(data?.is_bootstrapped ?? false);
+      } catch {
+        setIsBootstrapped(false);
+      }
     };
 
     // Set up auth state listener FIRST
@@ -63,38 +101,48 @@ export function AdminGuard() {
       }
     );
 
-    // THEN check for existing session and bootstrap status
-    Promise.all([
-      supabase.auth.getSession(),
-      checkBootstrap()
-    ]).then(([{ data: { session } }]) => {
+    // THEN check schema, session, and bootstrap status
+    const init = async () => {
+      const schemaReady = await checkSchema();
+      
+      if (!schemaReady) {
+        setLoading(false);
+        return;
+      }
+
+      await checkBootstrap();
+      
+      const { data: { session } } = await supabase.auth.getSession();
       setSession(session);
       setUser(session?.user ?? null);
 
       if (session?.user) {
-        checkIsAdmin(session.user.id).then((result) => {
-          setIsAdmin(result);
-          setLoading(false);
-        });
-      } else {
-        setLoading(false);
+        const adminStatus = await checkIsAdmin(session.user.id);
+        setIsAdmin(adminStatus);
       }
-    });
+      
+      setLoading(false);
+    };
+
+    init();
 
     return () => subscription.unsubscribe();
   }, []);
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-muted/30 via-background to-muted/50">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        </div>
       </div>
     );
   }
 
-  // Show setup wizard if Supabase not configured
-  if (needsSetup || !supabaseReady) {
-    return <AdminSetup />;
+  // Show setup if env vars missing OR schema not initialized
+  if (!isSupabaseConfigured || schemaStatus === "missing") {
+    return <AdminSetup envReady={isSupabaseConfigured} schemaReady={schemaStatus === "ready"} />;
   }
 
   // Not signed in - show login
@@ -115,7 +163,7 @@ export function AdminGuard() {
   // Loading admin status
   if (isAdmin === null) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-muted/30 via-background to-muted/50">
         <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
       </div>
     );
@@ -146,58 +194,77 @@ function AdminLogin() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="text-center">
-          <h1 className="text-2xl font-serif font-medium">Admin</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Sign in to manage your site
-          </p>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@example.com"
-              required
-              autoComplete="email"
-            />
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-muted/30 via-background to-muted/50">
+      <div className="w-full max-w-md">
+        {/* Card */}
+        <div className="bg-card border border-border rounded-xl shadow-lg p-8 space-y-6">
+          {/* Header */}
+          <div className="text-center space-y-2">
+            <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+              <Lock className="w-6 h-6 text-primary" />
+            </div>
+            <h1 className="text-2xl font-serif font-medium">Admin Dashboard</h1>
+            <p className="text-sm text-muted-foreground">
+              Sign in to manage your site content
+            </p>
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="password">Password</Label>
-            <Input
-              id="password"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
-              required
-              autoComplete="current-password"
-            />
-          </div>
-
+          {/* Error Banner */}
           {error && (
-            <p className="text-sm text-destructive">{error}</p>
+            <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-destructive flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-destructive">{error}</p>
+            </div>
           )}
 
-          <Button type="submit" className="w-full" disabled={loading}>
-            {loading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              "Sign in"
-            )}
-          </Button>
-        </form>
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="admin@example.com"
+                required
+                autoComplete="email"
+                className="h-11"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="password">Password</Label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+                autoComplete="current-password"
+                className="h-11"
+              />
+            </div>
+
+            <Button type="submit" className="w-full h-11" disabled={loading}>
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                "Sign in"
+              )}
+            </Button>
+          </form>
+        </div>
         
-        <div className="text-center">
-          <Link to="/" className="text-sm text-muted-foreground hover:text-foreground">
-            ← Back to site
+        {/* Back link */}
+        <div className="text-center mt-6">
+          <Link 
+            to="/" 
+            className="text-sm text-muted-foreground hover:text-foreground inline-flex items-center gap-2 transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Back to site
           </Link>
         </div>
       </div>
@@ -205,53 +272,71 @@ function AdminLogin() {
   );
 }
 
-function AdminSetup() {
+function AdminSetup({ envReady, schemaReady }: { envReady: boolean; schemaReady: boolean }) {
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
-      <div className="w-full max-w-md space-y-6">
-        <div className="text-center">
-          <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
-          <h1 className="text-2xl font-serif font-medium">Setup Required</h1>
-          <p className="text-sm text-muted-foreground mt-2">
-            Configure Supabase to enable admin functionality.
-          </p>
-        </div>
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-muted/30 via-background to-muted/50">
+      <div className="w-full max-w-md">
+        <div className="bg-card border border-border rounded-xl shadow-lg p-8 space-y-6">
+          {/* Header */}
+          <div className="text-center">
+            <div className="w-12 h-12 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center mx-auto mb-4">
+              <AlertTriangle className="w-6 h-6 text-amber-600 dark:text-amber-500" />
+            </div>
+            <h1 className="text-2xl font-serif font-medium">Setup Required</h1>
+            <p className="text-sm text-muted-foreground mt-2">
+              Complete the following steps to enable admin functionality.
+            </p>
+          </div>
 
-        <div className="p-4 border border-border rounded-lg bg-card space-y-3">
-          <h2 className="font-medium">Setup Checklist</h2>
-          <ul className="space-y-2 text-sm">
-            <li className="flex items-center gap-2">
-              <StatusIcon ok={supabaseReady} />
-              <span>Environment variables set</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <XCircle className="w-4 h-4 text-muted-foreground" />
-              <span>Run SQL script in Supabase</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <XCircle className="w-4 h-4 text-muted-foreground" />
-              <span>Create auth user</span>
-            </li>
-            <li className="flex items-center gap-2">
-              <XCircle className="w-4 h-4 text-muted-foreground" />
-              <span>Initialize with bootstrap token</span>
-            </li>
-          </ul>
-        </div>
+          {/* Checklist */}
+          <div className="p-4 border border-border rounded-lg bg-muted/30 space-y-3">
+            <h2 className="font-medium text-sm uppercase tracking-wide text-muted-foreground">Checklist</h2>
+            <ul className="space-y-2 text-sm">
+              <li className="flex items-center gap-3">
+                <StatusIcon ok={envReady} />
+                <span className={envReady ? "text-foreground" : "text-muted-foreground"}>
+                  Environment variables set
+                </span>
+              </li>
+              <li className="flex items-center gap-3">
+                <StatusIcon ok={schemaReady} />
+                <span className={schemaReady ? "text-foreground" : "text-muted-foreground"}>
+                  Database schema initialized
+                </span>
+              </li>
+              <li className="flex items-center gap-3">
+                <XCircle className="w-4 h-4 text-muted-foreground" />
+                <span className="text-muted-foreground">Auth user created</span>
+              </li>
+              <li className="flex items-center gap-3">
+                <XCircle className="w-4 h-4 text-muted-foreground" />
+                <span className="text-muted-foreground">Bootstrap token initialized</span>
+              </li>
+            </ul>
+          </div>
 
-        <div className="p-4 border border-border rounded-lg bg-card space-y-3">
-          <h2 className="font-medium">Steps</h2>
-          <ol className="text-sm space-y-2 list-decimal list-inside text-muted-foreground">
-            <li>Set <code className="bg-muted px-1 rounded">VITE_SUPABASE_URL</code> and <code className="bg-muted px-1 rounded">VITE_SUPABASE_ANON_KEY</code></li>
-            <li>Run <code className="bg-muted px-1 rounded">docs/sql/000_all.sql</code> in Supabase SQL Editor</li>
-            <li>Set the bootstrap token hash (see SQL comments)</li>
-            <li>Create a user in Supabase Auth</li>
-            <li>Sign in and enter your bootstrap token</li>
-          </ol>
-        </div>
+          {/* Instructions */}
+          <div className="space-y-3 text-sm">
+            <h2 className="font-medium">Next Steps</h2>
+            <ol className="space-y-2 list-decimal list-inside text-muted-foreground">
+              {!envReady && (
+                <li>
+                  Set <code className="bg-muted px-1.5 py-0.5 rounded text-xs">VITE_SUPABASE_URL</code> and{" "}
+                  <code className="bg-muted px-1.5 py-0.5 rounded text-xs">VITE_SUPABASE_ANON_KEY</code>
+                </li>
+              )}
+              {!schemaReady && (
+                <li>
+                  Run <code className="bg-muted px-1.5 py-0.5 rounded text-xs">docs/sql/000_all.sql</code> in Supabase SQL Editor
+                </li>
+              )}
+              <li>Create a user in Supabase Auth</li>
+              <li>Sign in and complete bootstrap</li>
+            </ol>
+          </div>
 
-        <div className="flex gap-3">
-          <Button asChild variant="outline" className="flex-1 gap-2">
+          {/* Actions */}
+          <Button asChild variant="outline" className="w-full gap-2">
             <Link to="/">
               <ArrowLeft className="w-4 h-4" />
               Back to Site
@@ -265,6 +350,7 @@ function AdminSetup() {
 
 function AdminBootstrap({ email }: { email?: string }) {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [token, setToken] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -285,8 +371,14 @@ function AdminBootstrap({ email }: { email?: string }) {
     }
     
     if (data?.success) {
-      toast({ title: "Success!", description: data.message || "You are now the admin." });
-      setTimeout(() => window.location.reload(), 500);
+      toast({ 
+        title: "🎉 Welcome, Admin!", 
+        description: "You now have full access. Redirecting to dashboard..." 
+      });
+      setTimeout(() => {
+        navigate("/admin/dashboard");
+        window.location.reload();
+      }, 1000);
     } else {
       toast({ title: "Bootstrap failed", description: data?.error || "Unknown error", variant: "destructive" });
       setLoading(false);
@@ -299,63 +391,69 @@ function AdminBootstrap({ email }: { email?: string }) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
-      <div className="w-full max-w-sm space-y-6">
-        <div className="text-center">
-          <Key className="w-12 h-12 text-primary mx-auto mb-4" />
-          <h1 className="text-2xl font-serif font-medium">Initialize Site</h1>
-          <p className="text-sm text-muted-foreground mt-2">
-            Enter your bootstrap token to become the admin.
-          </p>
-          {email && (
-            <p className="text-xs text-muted-foreground mt-1">
-              Signed in as {email}
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-muted/30 via-background to-muted/50">
+      <div className="w-full max-w-md">
+        <div className="bg-card border border-border rounded-xl shadow-lg p-8 space-y-6">
+          {/* Header */}
+          <div className="text-center">
+            <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+              <Key className="w-6 h-6 text-primary" />
+            </div>
+            <h1 className="text-2xl font-serif font-medium">Initialize Site</h1>
+            <p className="text-sm text-muted-foreground mt-2">
+              Enter your bootstrap token to become the admin.
             </p>
-          )}
-        </div>
-
-        <form onSubmit={handleBootstrap} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="token">Bootstrap Token</Label>
-            <Input
-              id="token"
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Enter your bootstrap token"
-              required
-              autoComplete="off"
-            />
-            <p className="text-xs text-muted-foreground">
-              This is the token you generated and set in the database.
-            </p>
+            {email && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Signed in as <span className="font-medium">{email}</span>
+              </p>
+            )}
           </div>
 
-          <Button type="submit" className="w-full gap-2" disabled={loading || !token}>
-            {loading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <>
-                <CheckCircle className="w-4 h-4" />
-                Initialize & Become Admin
-              </>
-            )}
-          </Button>
-        </form>
+          <form onSubmit={handleBootstrap} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="token">Bootstrap Token</Label>
+              <Input
+                id="token"
+                type="password"
+                value={token}
+                onChange={(e) => setToken(e.target.value)}
+                placeholder="Enter your bootstrap token"
+                required
+                autoComplete="off"
+                className="h-11"
+              />
+              <p className="text-xs text-muted-foreground">
+                This is the token you generated and set in the database.
+              </p>
+            </div>
 
-        <div className="flex gap-3">
-          <Button
-            variant="outline"
-            onClick={handleSignOut}
-            disabled={loading}
-            className="flex-1 gap-2"
-          >
-            <LogOut className="w-4 h-4" />
-            Sign out
-          </Button>
-          <Button asChild variant="ghost" className="flex-1">
-            <Link to="/">Back to Site</Link>
-          </Button>
+            <Button type="submit" className="w-full h-11 gap-2" disabled={loading || !token}>
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <>
+                  <CheckCircle className="w-4 h-4" />
+                  Initialize & Become Admin
+                </>
+              )}
+            </Button>
+          </form>
+
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              onClick={handleSignOut}
+              disabled={loading}
+              className="flex-1 gap-2"
+            >
+              <LogOut className="w-4 h-4" />
+              Sign out
+            </Button>
+            <Button asChild variant="ghost" className="flex-1">
+              <Link to="/">Back to Site</Link>
+            </Button>
+          </div>
         </div>
       </div>
     </div>
@@ -364,6 +462,7 @@ function AdminBootstrap({ email }: { email?: string }) {
 
 function AdminClaimOrDeny({ email, userId }: { email?: string; userId: string }) {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
   const [canClaim, setCanClaim] = useState(false);
@@ -408,8 +507,14 @@ function AdminClaimOrDeny({ email, userId }: { email?: string; userId: string })
       toast({ title: "Claim failed", description: error.message, variant: "destructive" });
       setLoading(false);
     } else if (data?.success) {
-      toast({ title: "Admin claimed!", description: "Reloading..." });
-      setTimeout(() => window.location.reload(), 500);
+      toast({ 
+        title: "🎉 Admin Claimed!", 
+        description: "Redirecting to dashboard..." 
+      });
+      setTimeout(() => {
+        navigate("/admin/dashboard");
+        window.location.reload();
+      }, 1000);
     } else {
       toast({ title: "Claim failed", description: data?.error || "Unknown error", variant: "destructive" });
       setLoading(false);
@@ -423,7 +528,7 @@ function AdminClaimOrDeny({ email, userId }: { email?: string; userId: string })
 
   if (checking) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-muted/30 via-background to-muted/50">
         <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
       </div>
     );
@@ -435,50 +540,52 @@ function AdminClaimOrDeny({ email, userId }: { email?: string; userId: string })
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
-      <div className="w-full max-w-sm text-center space-y-6">
-        <div>
-          <h1 className="text-2xl font-serif font-medium">
-            {canClaim ? "Claim Admin Access" : "Not Authorized"}
-          </h1>
-          <p className="text-sm text-muted-foreground mt-2">
-            Signed in as <span className="font-medium">{email}</span>
-          </p>
-        </div>
-
-        {canClaim ? (
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Be the first to claim admin rights for this site.
+    <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-muted/30 via-background to-muted/50">
+      <div className="w-full max-w-md">
+        <div className="bg-card border border-border rounded-xl shadow-lg p-8 text-center space-y-6">
+          <div>
+            <h1 className="text-2xl font-serif font-medium">
+              {canClaim ? "Claim Admin Access" : "Not Authorized"}
+            </h1>
+            <p className="text-sm text-muted-foreground mt-2">
+              Signed in as <span className="font-medium">{email}</span>
             </p>
-            <Button onClick={handleClaimAdmin} disabled={loading} className="w-full gap-2">
-              {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <CheckCircle className="w-4 h-4" />
-              )}
-              Claim Admin
-            </Button>
           </div>
-        ) : (
-          <p className="text-sm text-muted-foreground">
-            This account does not have admin access.
-          </p>
-        )}
 
-        <Button
-          variant="outline"
-          onClick={handleSignOut}
-          disabled={loading}
-          className="gap-2"
-        >
-          {loading ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
+          {canClaim ? (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Be the first to claim admin rights for this site.
+              </p>
+              <Button onClick={handleClaimAdmin} disabled={loading} className="w-full gap-2">
+                {loading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <CheckCircle className="w-4 h-4" />
+                )}
+                Claim Admin
+              </Button>
+            </div>
           ) : (
-            <LogOut className="w-4 h-4" />
+            <p className="text-sm text-muted-foreground">
+              This account does not have admin access.
+            </p>
           )}
-          Sign out
-        </Button>
+
+          <Button
+            variant="outline"
+            onClick={handleSignOut}
+            disabled={loading}
+            className="w-full gap-2"
+          >
+            {loading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <LogOut className="w-4 h-4" />
+            )}
+            Sign out
+          </Button>
+        </div>
       </div>
     </div>
   );
