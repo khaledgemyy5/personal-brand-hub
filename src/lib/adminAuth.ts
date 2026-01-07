@@ -1,5 +1,7 @@
-import { supabase } from "./supabaseClient";
+import { getSupabase, supabaseReady } from "./supabaseClient";
 import type { User, Session } from "@supabase/supabase-js";
+
+export { supabaseReady };
 
 export interface AdminAuthState {
   user: User | null;
@@ -12,6 +14,10 @@ export interface AdminAuthState {
  * Sign in with email and password
  */
 export async function signInWithEmail(email: string, password: string) {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: { message: 'Supabase not configured' } };
+  }
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
     password,
@@ -23,26 +29,29 @@ export async function signInWithEmail(email: string, password: string) {
  * Sign out the current user
  */
 export async function signOut() {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { error: null };
+  }
   const { error } = await supabase.auth.signOut();
   return { error };
 }
 
 /**
  * Check if the given user ID matches the admin_user_id in site_settings
+ * Uses is_admin() RPC for security
  */
-export async function checkIsAdmin(userId: string): Promise<boolean> {
+export async function checkIsAdmin(_userId?: string): Promise<boolean> {
+  const supabase = getSupabase();
+  if (!supabase) return false;
+  
   try {
-    const { data, error } = await supabase
-      .from("site_settings")
-      .select("admin_user_id")
-      .limit(1)
-      .maybeSingle();
-
-    if (error || !data) {
+    const { data, error } = await supabase.rpc('is_admin');
+    if (error) {
+      console.warn('[checkIsAdmin] RPC error:', error.message);
       return false;
     }
-
-    return data.admin_user_id === userId;
+    return data === true;
   } catch {
     return false;
   }
@@ -52,6 +61,10 @@ export async function checkIsAdmin(userId: string): Promise<boolean> {
  * Get current session
  */
 export async function getSession() {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { session: null, error: null };
+  }
   const { data, error } = await supabase.auth.getSession();
   return { session: data.session, error };
 }
