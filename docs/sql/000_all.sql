@@ -1,6 +1,9 @@
 -- =============================================================================
 -- Ammar Resume Site - Complete Database Setup (Single Idempotent Script)
--- Run this once in Supabase SQL Editor. Safe to re-run.
+-- Run this in Supabase SQL Editor. Safe to re-run.
+-- 
+-- IMPORTANT: After running this script, set BOOTSTRAP_TOKEN in site_settings
+-- to a secure random value (see instructions at bottom).
 -- =============================================================================
 
 -- =============================================================================
@@ -39,6 +42,12 @@ DROP POLICY IF EXISTS "analytics_events_public_insert" ON public.analytics_event
 DROP POLICY IF EXISTS "analytics_events_admin_read" ON public.analytics_events;
 DROP POLICY IF EXISTS "analytics_events_admin_delete" ON public.analytics_events;
 
+-- Drop storage policies
+DROP POLICY IF EXISTS "assets_public_read" ON storage.objects;
+DROP POLICY IF EXISTS "assets_admin_insert" ON storage.objects;
+DROP POLICY IF EXISTS "assets_admin_update" ON storage.objects;
+DROP POLICY IF EXISTS "assets_admin_delete" ON storage.objects;
+
 -- Drop view (depends on table)
 DROP VIEW IF EXISTS public.public_site_settings;
 
@@ -46,6 +55,7 @@ DROP VIEW IF EXISTS public.public_site_settings;
 DROP FUNCTION IF EXISTS public.is_admin();
 DROP FUNCTION IF EXISTS public.set_admin_user(uuid);
 DROP FUNCTION IF EXISTS public.claim_admin();
+DROP FUNCTION IF EXISTS public.bootstrap_set_admin(text);
 DROP FUNCTION IF EXISTS public.set_updated_at();
 
 -- Drop triggers (before modifying tables)
@@ -59,17 +69,19 @@ DROP TRIGGER IF EXISTS update_projects_updated_at ON public.projects;
 -- 1) site_settings (singleton row for site-wide configuration)
 CREATE TABLE IF NOT EXISTS public.site_settings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  admin_user_id uuid NOT NULL DEFAULT '00000000-0000-0000-0000-000000000000'::uuid,
+  admin_user_id uuid NULL, -- NULL = not yet bootstrapped
+  bootstrap_token_hash text NULL, -- SHA256 hash of bootstrap token
   nav_config jsonb NOT NULL DEFAULT '{"links":[],"ctaButton":{"visible":false,"href":"/resume","label":"Resume"}}'::jsonb,
   home_sections jsonb NOT NULL DEFAULT '{"sections":[]}'::jsonb,
   theme jsonb NOT NULL DEFAULT '{"mode":"system","accentColor":"#135BEC","font":"inter"}'::jsonb,
-  seo jsonb NOT NULL DEFAULT '{"title":"Ammar Jaber","description":"Technical Product Manager"}'::jsonb,
+  seo jsonb NOT NULL DEFAULT '{"title":"Portfolio","description":"Personal portfolio site"}'::jsonb,
   pages jsonb NOT NULL DEFAULT '{}'::jsonb,
   updated_at timestamptz DEFAULT now()
 );
 
 COMMENT ON TABLE public.site_settings IS 'Singleton table for site-wide settings. Only one row should exist.';
-COMMENT ON COLUMN public.site_settings.admin_user_id IS 'UUID of the admin. Set to all-zeros initially, claim_admin() sets it to first claimer.';
+COMMENT ON COLUMN public.site_settings.admin_user_id IS 'UUID of the admin. NULL = not bootstrapped yet.';
+COMMENT ON COLUMN public.site_settings.bootstrap_token_hash IS 'SHA256 hash of bootstrap token for secure first-time admin setup.';
 
 -- 2) projects
 CREATE TABLE IF NOT EXISTS public.projects (
@@ -148,7 +160,11 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Check if current user is admin (SECURITY DEFINER to avoid RLS recursion)
--- Safe: returns false if table doesn't exist or no row
+-- Returns false if:
+-- - Table doesn't exist
+-- - No row exists
+-- - admin_user_id is NULL (not bootstrapped)
+-- - Current user doesn't match admin_user_id
 CREATE OR REPLACE FUNCTION public.is_admin()
 RETURNS boolean
 LANGUAGE plpgsql
@@ -167,8 +183,8 @@ BEGIN
   -- Get admin_user_id
   SELECT admin_user_id INTO _admin_id FROM public.site_settings LIMIT 1;
   
-  -- No row or unset admin
-  IF _admin_id IS NULL OR _admin_id = '00000000-0000-0000-0000-000000000000'::uuid THEN
+  -- No row or NULL admin = not bootstrapped
+  IF _admin_id IS NULL THEN
     RETURN false;
   END IF;
   
@@ -177,23 +193,71 @@ BEGIN
 END;
 $$;
 
--- Set admin user helper (manual override)
-CREATE OR REPLACE FUNCTION public.set_admin_user(_user_id uuid)
-RETURNS void
+-- Bootstrap admin with token verification
+-- Sets admin_user_id to current user ONLY if:
+-- 1. admin_user_id is NULL (not yet bootstrapped)
+-- 2. Provided token matches the stored hash
+CREATE OR REPLACE FUNCTION public.bootstrap_set_admin(p_token text)
+RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
 AS $$
+DECLARE
+  _current_admin uuid;
+  _stored_hash text;
+  _provided_hash text;
+  _caller uuid;
 BEGIN
-  UPDATE public.site_settings SET admin_user_id = _user_id;
-  IF NOT FOUND THEN
-    RAISE EXCEPTION 'No site_settings row exists. Insert seed data first.';
+  _caller := auth.uid();
+  
+  IF _caller IS NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Not authenticated. Please sign in first.');
   END IF;
+  
+  IF p_token IS NULL OR p_token = '' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Bootstrap token is required.');
+  END IF;
+  
+  -- Get current state
+  SELECT admin_user_id, bootstrap_token_hash 
+  INTO _current_admin, _stored_hash 
+  FROM public.site_settings 
+  LIMIT 1;
+  
+  -- No row exists
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('success', false, 'error', 'No site_settings row. Run seed SQL first.');
+  END IF;
+  
+  -- Already bootstrapped
+  IF _current_admin IS NOT NULL THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Admin already configured. Use Supabase dashboard to change.');
+  END IF;
+  
+  -- No token hash set = insecure, reject
+  IF _stored_hash IS NULL OR _stored_hash = '' THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Bootstrap token not configured in database. Set bootstrap_token_hash first.');
+  END IF;
+  
+  -- Hash the provided token and compare
+  _provided_hash := encode(digest(p_token, 'sha256'), 'hex');
+  
+  IF _provided_hash != _stored_hash THEN
+    RETURN jsonb_build_object('success', false, 'error', 'Invalid bootstrap token.');
+  END IF;
+  
+  -- All checks passed - set admin
+  UPDATE public.site_settings 
+  SET admin_user_id = _caller,
+      bootstrap_token_hash = NULL -- Clear token after use for security
+  WHERE admin_user_id IS NULL;
+  
+  RETURN jsonb_build_object('success', true, 'admin_user_id', _caller::text, 'message', 'Admin configured successfully!');
 END;
 $$;
 
--- Claim admin: first authenticated user to call this becomes admin
--- Only works if admin_user_id is the placeholder (all zeros)
+-- Legacy claim_admin for backwards compatibility (disabled if token is set)
 CREATE OR REPLACE FUNCTION public.claim_admin()
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -202,6 +266,7 @@ SET search_path = public
 AS $$
 DECLARE
   _current_admin uuid;
+  _stored_hash text;
   _caller uuid;
 BEGIN
   _caller := auth.uid();
@@ -210,19 +275,28 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Not authenticated');
   END IF;
   
-  SELECT admin_user_id INTO _current_admin FROM public.site_settings LIMIT 1;
+  SELECT admin_user_id, bootstrap_token_hash 
+  INTO _current_admin, _stored_hash 
+  FROM public.site_settings 
+  LIMIT 1;
   
   IF _current_admin IS NULL THEN
-    RETURN jsonb_build_object('success', false, 'error', 'No site_settings row. Run seed SQL first.');
+    -- No admin set yet
+    -- If token hash is set, require token-based bootstrap
+    IF _stored_hash IS NOT NULL AND _stored_hash != '' THEN
+      RETURN jsonb_build_object('success', false, 'error', 'Bootstrap token required. Use the Initialize Site form.');
+    END IF;
+    
+    -- No token hash = allow direct claim (less secure, but backwards compatible)
+    UPDATE public.site_settings SET admin_user_id = _caller WHERE admin_user_id IS NULL;
+    RETURN jsonb_build_object('success', true, 'admin_user_id', _caller::text);
   END IF;
   
-  IF _current_admin != '00000000-0000-0000-0000-000000000000'::uuid THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Admin already claimed');
+  IF _current_admin = _caller THEN
+    RETURN jsonb_build_object('success', true, 'admin_user_id', _caller::text, 'message', 'Already admin');
   END IF;
   
-  UPDATE public.site_settings SET admin_user_id = _caller;
-  
-  RETURN jsonb_build_object('success', true, 'admin_user_id', _caller::text);
+  RETURN jsonb_build_object('success', false, 'error', 'Admin already claimed by another user');
 END;
 $$;
 
@@ -239,7 +313,7 @@ CREATE TRIGGER update_projects_updated_at
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 -- =============================================================================
--- PHASE 7: CREATE VIEW (Table exists, excludes admin_user_id)
+-- PHASE 7: CREATE VIEW (Table exists, excludes sensitive columns)
 -- =============================================================================
 
 CREATE OR REPLACE VIEW public.public_site_settings AS
@@ -250,7 +324,8 @@ SELECT
   theme,
   seo,
   pages,
-  updated_at
+  updated_at,
+  (admin_user_id IS NOT NULL) AS is_bootstrapped
 FROM public.site_settings;
 
 GRANT SELECT ON public.public_site_settings TO anon;
@@ -362,15 +437,53 @@ CREATE POLICY "analytics_events_admin_delete"
   USING (public.is_admin());
 
 -- =============================================================================
--- PHASE 10: SEED DATA (ON CONFLICT for idempotency)
+-- PHASE 10: STORAGE BUCKET FOR ASSETS
 -- =============================================================================
 
--- Site Settings (singleton row with placeholder admin)
+-- Create the assets bucket (idempotent)
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'assets',
+  'assets',
+  true,
+  5242880, -- 5MB limit
+  ARRAY['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/x-icon', 'application/pdf']
+)
+ON CONFLICT (id) DO UPDATE SET
+  public = EXCLUDED.public,
+  file_size_limit = EXCLUDED.file_size_limit,
+  allowed_mime_types = EXCLUDED.allowed_mime_types;
+
+-- Storage RLS policies
+CREATE POLICY "assets_public_read"
+  ON storage.objects FOR SELECT TO anon, authenticated
+  USING (bucket_id = 'assets');
+
+CREATE POLICY "assets_admin_insert"
+  ON storage.objects FOR INSERT TO authenticated
+  WITH CHECK (bucket_id = 'assets' AND public.is_admin());
+
+CREATE POLICY "assets_admin_update"
+  ON storage.objects FOR UPDATE TO authenticated
+  USING (bucket_id = 'assets' AND public.is_admin())
+  WITH CHECK (bucket_id = 'assets' AND public.is_admin());
+
+CREATE POLICY "assets_admin_delete"
+  ON storage.objects FOR DELETE TO authenticated
+  USING (bucket_id = 'assets' AND public.is_admin());
+
+-- =============================================================================
+-- PHASE 11: SEED DATA (ON CONFLICT for idempotency)
+-- =============================================================================
+
+-- Site Settings (singleton row, NOT bootstrapped yet)
+-- IMPORTANT: After insert, update bootstrap_token_hash with your token hash!
 INSERT INTO public.site_settings (
-  id, admin_user_id, nav_config, home_sections, theme, seo, pages
+  id, admin_user_id, bootstrap_token_hash, nav_config, home_sections, theme, seo, pages
 ) VALUES (
   'a0000000-0000-0000-0000-000000000001',
-  '00000000-0000-0000-0000-000000000000', -- Placeholder: claim_admin() sets this
+  NULL, -- NULL = not bootstrapped yet
+  NULL, -- Set this to SHA256 hash of your bootstrap token!
   '{
     "links": [
       {"href": "/", "label": "Home", "visible": true},
@@ -394,7 +507,7 @@ INSERT INTO public.site_settings (
   '{"title": "Ammar Jaber", "description": "Technical Product Manager (ex-LLM / Software Engineer)"}'::jsonb,
   '{
     "resume": {"enabled": true, "pdfUrl": null},
-    "contact": {"enabled": true, "email": "hello@example.com", "linkedin": "https://linkedin.com/in/example", "calendly": "https://calendly.com/example"},
+    "contact": {"enabled": true, "email": "hello@example.com", "linkedin": "https://linkedin.com/in/example"},
     "methodology": [
       "Start with why: Every product decision ties back to user value.",
       "Ship fast, learn faster: Small iterations, measurable outcomes.",
@@ -406,10 +519,11 @@ INSERT INTO public.site_settings (
 
 -- Demo Writing Category
 INSERT INTO public.writing_categories (id, name, order_index, enabled) VALUES
-('b0000000-0000-0000-0000-000000000001', 'Technical Articles', 1, true)
+('b0000000-0000-0000-0000-000000000001', 'Technical Articles', 1, true),
+('b0000000-0000-0000-0000-000000000002', 'Product Thinking', 2, true)
 ON CONFLICT (id) DO NOTHING;
 
--- Demo Writing Items
+-- Demo Writing Items (including Arabic example)
 INSERT INTO public.writing_items (id, category_id, title, url, platform_label, language, featured, enabled, order_index, why_this_matters, show_why) VALUES
 (
   'c0000000-0000-0000-0000-000000000001',
@@ -436,6 +550,19 @@ INSERT INTO public.writing_items (id, category_id, title, url, platform_label, l
   2,
   'Written to address the lack of quality Arabic resources for aspiring software engineers.',
   true
+),
+(
+  'c0000000-0000-0000-0000-000000000003',
+  'b0000000-0000-0000-0000-000000000002',
+  'The Art of Saying No: Product Prioritization',
+  'https://example.com/product-prioritization',
+  'Substack',
+  'EN',
+  true,
+  true,
+  3,
+  'A framework for making difficult prioritization decisions.',
+  false
 )
 ON CONFLICT (id) DO NOTHING;
 
@@ -452,7 +579,7 @@ INSERT INTO public.projects (id, slug, title, summary, tags, status, detail_leve
   true,
   true,
   '{"showOverview": true, "showChallenge": true, "showApproach": true, "showOutcome": true}'::jsonb,
-  '{"overview": "Designed and implemented a distributed task scheduling system capable of handling 5M+ daily jobs.", "challenge": "The existing monolithic job queue was hitting performance limits.", "approach": "Built a new architecture using Go for the core scheduler, Redis for distributed locking.", "outcome": "Reduced job processing latency by 60%, achieved 99.99% uptime."}'::jsonb,
+  '{"overview": "Designed and implemented a distributed task scheduling system capable of handling 5M+ daily jobs.", "challenge": "The existing monolithic job queue was hitting performance limits at scale.", "approach": "Built a new architecture using Go for the core scheduler, Redis for distributed locking and job state, and Kubernetes for orchestration.", "outcome": "Reduced job processing latency by 60%, achieved 99.99% uptime over 18 months."}'::jsonb,
   '[]'::jsonb,
   '["5M+ daily jobs processed", "60% latency reduction", "99.99% uptime"]'::jsonb,
   '[{"decision": "Chose Redis over Kafka for job queue", "tradeoff": "Simpler ops vs. guaranteed delivery", "outcome": "Redis persistence + retry logic achieved reliability goals"}]'::jsonb
@@ -472,15 +599,50 @@ INSERT INTO public.projects (id, slug, title, summary, tags, status, detail_leve
   '[]'::jsonb,
   '["$2B+ annual transactions", "Zero downtime migration", "PCI-DSS compliant"]'::jsonb,
   '[]'::jsonb
+),
+(
+  'd0000000-0000-0000-0000-000000000003',
+  'ai-content-moderation',
+  'AI Content Moderation System',
+  'Built an ML-powered content moderation pipeline processing 10M+ items daily with 99.5% accuracy.',
+  ARRAY['Python', 'PyTorch', 'FastAPI', 'GCP'],
+  'PUBLIC',
+  'STANDARD',
+  true,
+  true,
+  '{"showOverview": true, "showChallenge": true, "showApproach": true, "showOutcome": true}'::jsonb,
+  '{"overview": "Designed and deployed an AI-powered content moderation system for a social platform.", "challenge": "Manual moderation couldn''t scale with user growth, and existing solutions had high false positive rates.", "approach": "Developed a multi-model ensemble combining text classification, image analysis, and context-aware reasoning.", "outcome": "Reduced moderation costs by 70% while improving accuracy from 85% to 99.5%."}'::jsonb,
+  '[]'::jsonb,
+  '["10M+ items/day", "99.5% accuracy", "70% cost reduction"]'::jsonb,
+  '[{"decision": "Ensemble approach vs single model", "tradeoff": "Complexity vs accuracy", "outcome": "Ensemble achieved target accuracy, single model fell short"}]'::jsonb
 )
 ON CONFLICT (id) DO NOTHING;
 
 -- =============================================================================
 -- DONE!
+-- =============================================================================
 -- 
--- Next steps:
--- 1. Set env vars: VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY
--- 2. Create a user in Supabase Auth (email/password)
--- 3. Login to /admin and click "Claim Admin"
--- 4. Now you have full admin access
+-- NEXT STEPS:
+--
+-- 1. SET BOOTSTRAP TOKEN (required for secure admin setup):
+--    
+--    Generate a random token:
+--      node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+--    
+--    Or use: openssl rand -hex 32
+--    
+--    Then run this SQL (replace YOUR_TOKEN with your generated token):
+--    
+--    UPDATE public.site_settings 
+--    SET bootstrap_token_hash = encode(digest('YOUR_TOKEN', 'sha256'), 'hex')
+--    WHERE id = 'a0000000-0000-0000-0000-000000000001';
+--
+-- 2. Set env vars in your deployment:
+--    VITE_SUPABASE_URL=https://your-project.supabase.co
+--    VITE_SUPABASE_ANON_KEY=your-anon-key
+--
+-- 3. Create a user in Supabase Auth (email/password)
+--
+-- 4. Visit /admin, login, enter your bootstrap token to become admin
+--
 -- =============================================================================

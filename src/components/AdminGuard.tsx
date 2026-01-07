@@ -6,8 +6,16 @@ import type { User, Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, LogOut, AlertTriangle, CheckCircle, XCircle, ArrowLeft } from "lucide-react";
+import { Loader2, LogOut, AlertTriangle, CheckCircle, XCircle, ArrowLeft, Key } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+
+// Status icon component (module-level to avoid ref warnings)
+const StatusIcon = ({ ok }: { ok: boolean }) => {
+  if (ok) {
+    return <CheckCircle className="w-4 h-4 text-green-600" />;
+  }
+  return <XCircle className="w-4 h-4 text-red-500" />;
+};
 
 export function AdminGuard() {
   const [user, setUser] = useState<User | null>(null);
@@ -15,6 +23,7 @@ export function AdminGuard() {
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [needsSetup, setNeedsSetup] = useState(false);
+  const [isBootstrapped, setIsBootstrapped] = useState<boolean | null>(null);
 
   useEffect(() => {
     const supabase = getSupabase();
@@ -25,6 +34,17 @@ export function AdminGuard() {
       setLoading(false);
       return;
     }
+
+    // Check if site is bootstrapped
+    const checkBootstrap = async () => {
+      const { data } = await supabase
+        .from('public_site_settings')
+        .select('is_bootstrapped')
+        .limit(1)
+        .maybeSingle();
+      
+      setIsBootstrapped(data?.is_bootstrapped ?? false);
+    };
 
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
@@ -43,8 +63,11 @@ export function AdminGuard() {
       }
     );
 
-    // THEN check for existing session
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    // THEN check for existing session and bootstrap status
+    Promise.all([
+      supabase.auth.getSession(),
+      checkBootstrap()
+    ]).then(([{ data: { session } }]) => {
       setSession(session);
       setUser(session?.user ?? null);
 
@@ -69,8 +92,8 @@ export function AdminGuard() {
     );
   }
 
-  // Show setup wizard if Supabase not configured or user not admin yet
-  if (needsSetup || (!user && !supabaseReady)) {
+  // Show setup wizard if Supabase not configured
+  if (needsSetup || !supabaseReady) {
     return <AdminSetup />;
   }
 
@@ -79,7 +102,12 @@ export function AdminGuard() {
     return <AdminLogin />;
   }
 
-  // Signed in but checking admin or needs to claim
+  // Signed in but site not bootstrapped - show bootstrap form
+  if (isBootstrapped === false) {
+    return <AdminBootstrap email={user.email} />;
+  }
+
+  // Signed in but not admin - show claim/deny
   if (isAdmin === false) {
     return <AdminClaimOrDeny email={user.email} userId={user.id} />;
   }
@@ -118,7 +146,7 @@ function AdminLogin() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
+    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center">
           <h1 className="text-2xl font-serif font-medium">Admin</h1>
@@ -166,21 +194,18 @@ function AdminLogin() {
             )}
           </Button>
         </form>
+        
+        <div className="text-center">
+          <Link to="/" className="text-sm text-muted-foreground hover:text-foreground">
+            ← Back to site
+          </Link>
+        </div>
       </div>
     </div>
   );
 }
 
-// Simple status icon component to avoid ref warnings
-const StatusIcon = ({ ok }: { ok: boolean }) => {
-  if (ok) {
-    return <CheckCircle className="w-4 h-4 text-green-600" />;
-  }
-  return <XCircle className="w-4 h-4 text-red-500" />;
-};
-
 function AdminSetup() {
-
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-background">
       <div className="w-full max-w-md space-y-6">
@@ -209,7 +234,7 @@ function AdminSetup() {
             </li>
             <li className="flex items-center gap-2">
               <XCircle className="w-4 h-4 text-muted-foreground" />
-              <span>Claim admin</span>
+              <span>Initialize with bootstrap token</span>
             </li>
           </ul>
         </div>
@@ -219,8 +244,9 @@ function AdminSetup() {
           <ol className="text-sm space-y-2 list-decimal list-inside text-muted-foreground">
             <li>Set <code className="bg-muted px-1 rounded">VITE_SUPABASE_URL</code> and <code className="bg-muted px-1 rounded">VITE_SUPABASE_ANON_KEY</code></li>
             <li>Run <code className="bg-muted px-1 rounded">docs/sql/000_all.sql</code> in Supabase SQL Editor</li>
+            <li>Set the bootstrap token hash (see SQL comments)</li>
             <li>Create a user in Supabase Auth</li>
-            <li>Sign in and click "Claim Admin"</li>
+            <li>Sign in and enter your bootstrap token</li>
           </ol>
         </div>
 
@@ -237,11 +263,111 @@ function AdminSetup() {
   );
 }
 
+function AdminBootstrap({ email }: { email?: string }) {
+  const { toast } = useToast();
+  const [token, setToken] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleBootstrap = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    const supabase = getSupabase();
+    if (!supabase) return;
+
+    setLoading(true);
+    
+    const { data, error } = await supabase.rpc('bootstrap_set_admin', { p_token: token });
+    
+    if (error) {
+      toast({ title: "Bootstrap failed", description: error.message, variant: "destructive" });
+      setLoading(false);
+      return;
+    }
+    
+    if (data?.success) {
+      toast({ title: "Success!", description: data.message || "You are now the admin." });
+      setTimeout(() => window.location.reload(), 500);
+    } else {
+      toast({ title: "Bootstrap failed", description: data?.error || "Unknown error", variant: "destructive" });
+      setLoading(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    setLoading(true);
+    await signOut();
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
+      <div className="w-full max-w-sm space-y-6">
+        <div className="text-center">
+          <Key className="w-12 h-12 text-primary mx-auto mb-4" />
+          <h1 className="text-2xl font-serif font-medium">Initialize Site</h1>
+          <p className="text-sm text-muted-foreground mt-2">
+            Enter your bootstrap token to become the admin.
+          </p>
+          {email && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Signed in as {email}
+            </p>
+          )}
+        </div>
+
+        <form onSubmit={handleBootstrap} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="token">Bootstrap Token</Label>
+            <Input
+              id="token"
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="Enter your bootstrap token"
+              required
+              autoComplete="off"
+            />
+            <p className="text-xs text-muted-foreground">
+              This is the token you generated and set in the database.
+            </p>
+          </div>
+
+          <Button type="submit" className="w-full gap-2" disabled={loading || !token}>
+            {loading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <>
+                <CheckCircle className="w-4 h-4" />
+                Initialize & Become Admin
+              </>
+            )}
+          </Button>
+        </form>
+
+        <div className="flex gap-3">
+          <Button
+            variant="outline"
+            onClick={handleSignOut}
+            disabled={loading}
+            className="flex-1 gap-2"
+          >
+            <LogOut className="w-4 h-4" />
+            Sign out
+          </Button>
+          <Button asChild variant="ghost" className="flex-1">
+            <Link to="/">Back to Site</Link>
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdminClaimOrDeny({ email, userId }: { email?: string; userId: string }) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
   const [canClaim, setCanClaim] = useState(false);
+  const [requiresToken, setRequiresToken] = useState(false);
 
   useEffect(() => {
     async function checkClaimStatus() {
@@ -254,12 +380,17 @@ function AdminClaimOrDeny({ email, userId }: { email?: string; userId: string })
       // Check if admin is already claimed by checking site_settings
       const { data } = await supabase
         .from('site_settings')
-        .select('admin_user_id')
+        .select('admin_user_id, bootstrap_token_hash')
         .limit(1)
         .maybeSingle();
 
-      if (data?.admin_user_id === '00000000-0000-0000-0000-000000000000') {
-        setCanClaim(true);
+      if (data?.admin_user_id === null) {
+        // Not bootstrapped yet
+        if (data?.bootstrap_token_hash) {
+          setRequiresToken(true);
+        } else {
+          setCanClaim(true);
+        }
       }
       setChecking(false);
     }
@@ -296,6 +427,11 @@ function AdminClaimOrDeny({ email, userId }: { email?: string; userId: string })
         <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
       </div>
     );
+  }
+
+  // Requires token - redirect to bootstrap
+  if (requiresToken) {
+    return <AdminBootstrap email={email} />;
   }
 
   return (
