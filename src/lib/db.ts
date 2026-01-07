@@ -3,8 +3,15 @@
 // All functions return { data, error } pattern
 // =============================================================================
 
-import { getSupabase, supabaseReady } from './supabaseClient';
+import { getSupabase, supabaseReady, isSupabaseConfigured } from './supabaseClient';
 import { defaultSiteSettings } from './defaultSiteSettings';
+import { 
+  demoSiteSettings, 
+  demoProjects, 
+  demoProjectDetails, 
+  demoWritingCategories, 
+  demoWritingItems 
+} from './demoData';
 import type {
   ApiResponse,
   SiteSettings,
@@ -153,10 +160,10 @@ export async function getSiteSettings(): Promise<ApiResponse<SiteSettings>> {
     return { data: cached, error: null };
   }
 
-  // If Supabase not ready, return defaults silently for public pages
+  // If Supabase not configured, return demo data for public pages
   const supabase = getSupabase();
   if (!supabase) {
-    return { data: defaultSiteSettings, error: null };
+    return { data: demoSiteSettings, error: null };
   }
 
   try {
@@ -167,16 +174,16 @@ export async function getSiteSettings(): Promise<ApiResponse<SiteSettings>> {
       .single();
 
     if (error || !data) {
-      // Return defaults for public pages
-      return { data: defaultSiteSettings, error: null };
+      // Return demo data for public pages
+      return { data: demoSiteSettings, error: null };
     }
 
     const settings = transformSiteSettings(data);
     setCache(cacheKey, settings);
     return { data: settings, error: null };
   } catch (e) {
-    // Return defaults for public pages
-    return { data: defaultSiteSettings, error: null };
+    // Return demo data for public pages
+    return { data: demoSiteSettings, error: null };
   }
 }
 
@@ -219,8 +226,17 @@ export async function getPublishedProjects(options?: {
   tag?: string;
 }): Promise<ApiResponse<ProjectListItem[]>> {
   const supabase = getSupabase();
+  
+  // If Supabase not configured, return demo projects
   if (!supabase) {
-    return { data: [], error: null };
+    let projects = [...demoProjects];
+    if (options?.tag) {
+      projects = projects.filter(p => p.tags.some(t => t.toLowerCase() === options.tag!.toLowerCase()));
+    }
+    if (options?.limit) {
+      projects = projects.slice(0, options.limit);
+    }
+    return { data: projects, error: null };
   }
 
   // Cache key includes limit (tag filtering is done post-fetch)
@@ -286,8 +302,14 @@ export async function getPublishedProjects(options?: {
  */
 export async function getProjectBySlug(slug: string): Promise<ApiResponse<ExtendedProject>> {
   const supabase = getSupabase();
+  
+  // If Supabase not configured, return demo project detail
   if (!supabase) {
-    return { data: null, error: 'Supabase not configured' };
+    const demoProject = demoProjectDetails[slug];
+    if (demoProject) {
+      return { data: demoProject, error: null };
+    }
+    return { data: null, error: 'Project not found' };
   }
 
   try {
@@ -317,8 +339,10 @@ export async function getProjectBySlug(slug: string): Promise<ApiResponse<Extend
  */
 export async function getWritingCategories(): Promise<ApiResponse<WritingCategory[]>> {
   const supabase = getSupabase();
+  
+  // If Supabase not configured, return demo categories
   if (!supabase) {
-    return { data: [], error: null };
+    return { data: demoWritingCategories, error: null };
   }
 
   const cacheKey = 'writing_categories';
@@ -354,8 +378,17 @@ export async function getWritingItems(options?: {
   limit?: number;
 }): Promise<ApiResponse<WritingListItem[]>> {
   const supabase = getSupabase();
+  
+  // If Supabase not configured, return demo writing items
   if (!supabase) {
-    return { data: [], error: null };
+    let items = [...demoWritingItems];
+    if (options?.featuredOnly) {
+      items = items.filter(item => item.featured);
+    }
+    if (options?.limit) {
+      items = items.slice(0, options.limit);
+    }
+    return { data: items, error: null };
   }
 
   try {

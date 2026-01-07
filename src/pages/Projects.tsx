@@ -54,18 +54,20 @@ export default function Projects() {
         content="Selected projects by Ammar. Software engineering and product work showcasing technical skills and problem-solving."
       />
 
-      <div className="container-narrow section-spacing">
-        <h1 className="mb-4">Projects</h1>
-        <p className="text-muted-foreground mb-8">
-          A selection of projects I've worked on. More details available on each project page.
-        </p>
+      <div className="container-narrow py-16 md:py-24">
+        <header className="mb-12">
+          <h1 className="text-3xl md:text-4xl font-serif font-medium mb-4">Projects</h1>
+          <p className="text-lg text-muted-foreground max-w-lg">
+            A selection of projects I've worked on. Click through for details on approach, challenges, and outcomes.
+          </p>
+        </header>
 
         {/* Tag filter pills */}
         {!loading && allTags.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-8">
+          <div className="flex flex-wrap gap-2 mb-10">
             <button
               onClick={() => setSelectedTag(null)}
-              className={`px-3 py-1 text-sm rounded-full border transition-colors ${
+              className={`px-4 py-2 text-sm rounded-full border transition-all ${
                 selectedTag === null
                   ? "bg-foreground text-background border-foreground"
                   : "bg-transparent text-muted-foreground border-border hover:border-foreground hover:text-foreground"
@@ -77,7 +79,7 @@ export default function Projects() {
               <button
                 key={tag}
                 onClick={() => setSelectedTag(tag)}
-                className={`px-3 py-1 text-sm rounded-full border transition-colors ${
+                className={`px-4 py-2 text-sm rounded-full border transition-all ${
                   selectedTag === tag
                     ? "bg-foreground text-background border-foreground"
                     : "bg-transparent text-muted-foreground border-border hover:border-foreground hover:text-foreground"
@@ -89,18 +91,18 @@ export default function Projects() {
           </div>
         )}
 
-        {/* Projects list */}
-        <div className="space-y-6">
-          {loading ? (
-            <>
-              <ProjectSkeleton />
-              <ProjectSkeleton />
-              <ProjectSkeleton />
-            </>
-          ) : filteredProjects.length === 0 ? (
-            <p className="text-muted-foreground py-8">No projects found.</p>
-          ) : (
-            filteredProjects.map((project) => (
+        {/* Projects grid */}
+        {loading ? (
+          <div className="grid gap-6 md:grid-cols-2">
+            <ProjectSkeleton />
+            <ProjectSkeleton />
+            <ProjectSkeleton />
+          </div>
+        ) : filteredProjects.length === 0 && selectedTag ? (
+          <p className="text-muted-foreground py-8">No projects found with tag "{selectedTag}".</p>
+        ) : (
+          <div className="grid gap-6 md:grid-cols-2">
+            {filteredProjects.map((project) => (
               <ProjectItem
                 key={project.id}
                 title={project.title}
@@ -111,9 +113,9 @@ export default function Projects() {
                 slug={project.slug}
                 onClick={() => handleProjectClick(project.slug)}
               />
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </>
   );
@@ -143,37 +145,39 @@ const ProjectItem = memo(function ProjectItem({
     <Link
       to={`/projects/${slug}`}
       onClick={onClick}
-      className="block p-6 -mx-6 rounded-lg card-hover border border-transparent hover:border-border"
+      className="group block p-6 rounded-lg border border-border hover:border-foreground/20 transition-all"
     >
-      <div className="flex items-start justify-between gap-4 mb-3">
-        <div className="flex items-center gap-2">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="flex items-center gap-2 min-w-0">
           {isConfidential && (
-            <Lock className="w-4 h-4 text-muted-foreground shrink-0" aria-label="Confidential project" />
+            <Lock className="w-4 h-4 text-muted-foreground shrink-0" aria-label="Confidential" />
           )}
-          <h2 className="font-serif text-xl font-medium" dir="auto">{title}</h2>
+          <h2 className="font-serif text-xl font-medium group-hover:text-accent transition-colors truncate" dir="auto">
+            {title}
+          </h2>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          {featured && !isConfidential && !isConcept && (
+            <Badge className="bg-accent text-accent-foreground text-xs">Featured</Badge>
+          )}
           {isConcept && (
-            <Badge variant="outline" className="gap-1">
+            <Badge variant="outline" className="gap-1 text-xs">
               <Lightbulb className="w-3 h-3" />
               Concept
             </Badge>
           )}
           {isConfidential && (
-            <Badge variant="secondary">Confidential</Badge>
-          )}
-          {featured && !isConfidential && !isConcept && (
-            <Badge variant="secondary">Featured</Badge>
+            <Badge variant="secondary" className="text-xs">Confidential</Badge>
           )}
         </div>
       </div>
 
-      <p className="text-muted-foreground mb-4" dir="auto">
-        {isConfidential ? summary.slice(0, 150) + (summary.length > 150 ? '…' : '') : summary}
+      <p className="text-muted-foreground text-sm leading-relaxed mb-4 line-clamp-2" dir="auto">
+        {isConfidential ? summary.slice(0, 120) + (summary.length > 120 ? '…' : '') : summary}
       </p>
 
       {tags && tags.length > 0 && (
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
           {tags.map((tag) => (
             <span
               key={tag}
@@ -190,7 +194,7 @@ const ProjectItem = memo(function ProjectItem({
 
 function ProjectSkeleton() {
   return (
-    <div className="p-6 -mx-6 space-y-3">
+    <div className="p-6 rounded-lg border border-border space-y-3">
       <div className="flex items-start justify-between gap-4">
         <Skeleton className="h-6 w-48" />
         <Skeleton className="h-5 w-16" />
@@ -200,7 +204,6 @@ function ProjectSkeleton() {
       <div className="flex gap-2 pt-1">
         <Skeleton className="h-5 w-16" />
         <Skeleton className="h-5 w-20" />
-        <Skeleton className="h-5 w-14" />
       </div>
     </div>
   );

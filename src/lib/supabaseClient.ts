@@ -5,6 +5,7 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 // Track if we have valid credentials
 export const supabaseReady = Boolean(supabaseUrl && supabaseAnonKey);
+export const isSupabaseConfigured = supabaseReady;
 
 let supabaseInstance: SupabaseClient | null = null;
 
