@@ -1,17 +1,11 @@
 // =============================================================================
 // Database query helpers for Supabase
 // All functions return { data, error } pattern
+// NO DEMO DATA - Supabase is the single source of truth
 // =============================================================================
 
-import { getSupabase, supabaseReady, isSupabaseConfigured } from './supabaseClient';
+import { getSupabase, hasSupabaseEnv } from './supabaseClient';
 import { defaultSiteSettings } from './defaultSiteSettings';
-import { 
-  demoSiteSettings, 
-  demoProjects, 
-  demoProjectDetails, 
-  demoWritingCategories, 
-  demoWritingItems 
-} from './demoData';
 import type {
   ApiResponse,
   SiteSettings,
@@ -42,7 +36,7 @@ import {
 } from './runtime';
 
 // Re-export for convenience
-export { supabaseReady } from './supabaseClient';
+export { supabaseReady, hasSupabaseEnv } from './supabaseClient';
 
 // -----------------------------------------------------------------------------
 // Simple in-memory cache
@@ -145,13 +139,130 @@ function transformProject(row: Record<string, unknown>): ExtendedProject {
 }
 
 // =============================================================================
-// PUBLIC READ FUNCTIONS
+// ADMIN HEALTH CHECK
+// =============================================================================
+
+export interface HealthCheckResult {
+  timestamp: string;
+  env: { ok: boolean; message: string };
+  schema: { ok: boolean; message: string };
+  auth: { ok: boolean; message: string; email?: string };
+  rls: { ok: boolean; message: string };
+  tables: {
+    site_settings: { ok: boolean; message: string };
+    projects: { ok: boolean; message: string };
+    writing_items: { ok: boolean; message: string };
+  };
+}
+
+export async function adminHealthCheck(): Promise<HealthCheckResult> {
+  const result: HealthCheckResult = {
+    timestamp: new Date().toISOString(),
+    env: { ok: false, message: 'Checking...' },
+    schema: { ok: false, message: 'Checking...' },
+    auth: { ok: false, message: 'Checking...' },
+    rls: { ok: false, message: 'Checking...' },
+    tables: {
+      site_settings: { ok: false, message: 'Checking...' },
+      projects: { ok: false, message: 'Checking...' },
+      writing_items: { ok: false, message: 'Checking...' },
+    },
+  };
+
+  // Check env
+  if (!hasSupabaseEnv) {
+    result.env = { ok: false, message: 'Missing VITE_SUPABASE_URL or VITE_SUPABASE_ANON_KEY' };
+    return result;
+  }
+  result.env = { ok: true, message: 'Environment variables configured' };
+
+  const supabase = getSupabase();
+  if (!supabase) {
+    result.schema = { ok: false, message: 'Supabase client not initialized' };
+    return result;
+  }
+
+  // Check auth
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      result.auth = { ok: true, message: 'Authenticated', email: user.email };
+    } else {
+      result.auth = { ok: false, message: 'Not authenticated' };
+    }
+  } catch (e) {
+    result.auth = { ok: false, message: e instanceof Error ? e.message : 'Auth check failed' };
+  }
+
+  // Check site_settings table
+  try {
+    const { data, error } = await supabase
+      .from('site_settings')
+      .select('id')
+      .limit(1);
+    
+    if (error) {
+      if (error.message.includes('does not exist') || error.code === '42P01') {
+        result.schema = { ok: false, message: 'Schema not initialized - run docs/sql/000_all.sql' };
+        result.tables.site_settings = { ok: false, message: 'Table does not exist' };
+      } else if (error.code === '42501' || error.message.includes('permission denied')) {
+        result.schema = { ok: true, message: 'Schema exists' };
+        result.tables.site_settings = { ok: false, message: 'RLS denied access' };
+        result.rls = { ok: false, message: 'RLS blocking access - check admin role' };
+      } else {
+        result.tables.site_settings = { ok: false, message: error.message };
+      }
+    } else {
+      result.schema = { ok: true, message: 'Schema initialized' };
+      result.tables.site_settings = { ok: true, message: `Found ${data?.length ?? 0} row(s)` };
+      result.rls = { ok: true, message: 'RLS passed' };
+    }
+  } catch (e) {
+    result.tables.site_settings = { ok: false, message: e instanceof Error ? e.message : 'Query failed' };
+  }
+
+  // Check projects table
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('id')
+      .limit(1);
+    
+    if (error) {
+      result.tables.projects = { ok: false, message: error.message };
+    } else {
+      result.tables.projects = { ok: true, message: `Found ${data?.length ?? 0} row(s)` };
+    }
+  } catch (e) {
+    result.tables.projects = { ok: false, message: e instanceof Error ? e.message : 'Query failed' };
+  }
+
+  // Check writing_items table
+  try {
+    const { data, error } = await supabase
+      .from('writing_items')
+      .select('id')
+      .limit(1);
+    
+    if (error) {
+      result.tables.writing_items = { ok: false, message: error.message };
+    } else {
+      result.tables.writing_items = { ok: true, message: `Found ${data?.length ?? 0} row(s)` };
+    }
+  } catch (e) {
+    result.tables.writing_items = { ok: false, message: e instanceof Error ? e.message : 'Query failed' };
+  }
+
+  return result;
+}
+
+// =============================================================================
+// PUBLIC READ FUNCTIONS (Supabase-only, no fallbacks)
 // =============================================================================
 
 /**
  * Fetch site settings from public_site_settings view - cached for 60s
- * For PUBLIC pages: returns defaultSiteSettings on any error (graceful fallback)
- * Use getSiteSettingsStrict() for admin pages that need real data
+ * Returns error if Supabase not configured or query fails
  */
 export async function getSiteSettings(): Promise<ApiResponse<SiteSettings>> {
   const cacheKey = 'site_settings';
@@ -160,10 +271,9 @@ export async function getSiteSettings(): Promise<ApiResponse<SiteSettings>> {
     return { data: cached, error: null };
   }
 
-  // If Supabase not configured, return demo data for public pages
   const supabase = getSupabase();
   if (!supabase) {
-    return { data: demoSiteSettings, error: null };
+    return { data: null, error: 'Supabase not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.' };
   }
 
   try {
@@ -171,19 +281,24 @@ export async function getSiteSettings(): Promise<ApiResponse<SiteSettings>> {
       .from('public_site_settings')
       .select('*')
       .limit(1)
-      .single();
+      .maybeSingle();
 
-    if (error || !data) {
-      // Return demo data for public pages
-      return { data: demoSiteSettings, error: null };
+    if (error) {
+      if (error.message.includes('does not exist')) {
+        return { data: null, error: 'Database schema not initialized. Run docs/sql/000_all.sql in Supabase.' };
+      }
+      return { data: null, error: error.message };
+    }
+
+    if (!data) {
+      return { data: null, error: 'Site settings not found. Run docs/sql/000_all.sql in Supabase.' };
     }
 
     const settings = transformSiteSettings(data);
     setCache(cacheKey, settings);
     return { data: settings, error: null };
   } catch (e) {
-    // Return demo data for public pages
-    return { data: demoSiteSettings, error: null };
+    return { data: null, error: e instanceof Error ? e.message : 'Unknown error fetching settings' };
   }
 }
 
@@ -201,11 +316,14 @@ export async function getSiteSettingsStrict(): Promise<ApiResponse<SiteSettings>
       .from('public_site_settings')
       .select('*')
       .limit(1)
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.warn('[getSiteSettingsStrict] Query failed:', error.message);
-      return { data: null, error: 'Site settings not configured. Run docs/sql/000_all.sql in Supabase.' };
+      if (error.message.includes('does not exist')) {
+        return { data: null, error: 'Database schema not initialized. Run docs/sql/000_all.sql in Supabase.' };
+      }
+      return { data: null, error: error.message };
     }
 
     if (!data) {
@@ -227,16 +345,8 @@ export async function getPublishedProjects(options?: {
 }): Promise<ApiResponse<ProjectListItem[]>> {
   const supabase = getSupabase();
   
-  // If Supabase not configured, return demo projects
   if (!supabase) {
-    let projects = [...demoProjects];
-    if (options?.tag) {
-      projects = projects.filter(p => p.tags.some(t => t.toLowerCase() === options.tag!.toLowerCase()));
-    }
-    if (options?.limit) {
-      projects = projects.slice(0, options.limit);
-    }
-    return { data: projects, error: null };
+    return { data: null, error: 'Supabase not configured' };
   }
 
   // Cache key includes limit (tag filtering is done post-fetch)
@@ -244,7 +354,6 @@ export async function getPublishedProjects(options?: {
   const cached = getCached<ProjectListItem[]>(cacheKey);
   
   if (cached && !options?.tag) {
-    // Return cached if no tag filter
     return { data: options?.limit ? cached.slice(0, options.limit) : cached, error: null };
   }
 
@@ -263,6 +372,9 @@ export async function getPublishedProjects(options?: {
     const { data, error } = await query;
 
     if (error) {
+      if (error.message.includes('does not exist')) {
+        return { data: null, error: 'Database schema not initialized. Run docs/sql/000_all.sql in Supabase.' };
+      }
       return { data: null, error: error.message };
     }
 
@@ -277,7 +389,7 @@ export async function getPublishedProjects(options?: {
     }));
 
     // Cache before filtering
-    setCache(cacheKey, projects, 30 * 1000); // 30s cache
+    setCache(cacheKey, projects, 30 * 1000);
 
     // Filter by tag if specified
     if (options?.tag) {
@@ -303,13 +415,8 @@ export async function getPublishedProjects(options?: {
 export async function getProjectBySlug(slug: string): Promise<ApiResponse<ExtendedProject>> {
   const supabase = getSupabase();
   
-  // If Supabase not configured, return demo project detail
   if (!supabase) {
-    const demoProject = demoProjectDetails[slug];
-    if (demoProject) {
-      return { data: demoProject, error: null };
-    }
-    return { data: null, error: 'Project not found' };
+    return { data: null, error: 'Supabase not configured' };
   }
 
   try {
@@ -340,9 +447,8 @@ export async function getProjectBySlug(slug: string): Promise<ApiResponse<Extend
 export async function getWritingCategories(): Promise<ApiResponse<WritingCategory[]>> {
   const supabase = getSupabase();
   
-  // If Supabase not configured, return demo categories
   if (!supabase) {
-    return { data: demoWritingCategories, error: null };
+    return { data: null, error: 'Supabase not configured' };
   }
 
   const cacheKey = 'writing_categories';
@@ -359,6 +465,9 @@ export async function getWritingCategories(): Promise<ApiResponse<WritingCategor
       .order('order_index');
 
     if (error) {
+      if (error.message.includes('does not exist')) {
+        return { data: null, error: 'Database schema not initialized. Run docs/sql/000_all.sql in Supabase.' };
+      }
       return { data: null, error: error.message };
     }
 
@@ -379,16 +488,8 @@ export async function getWritingItems(options?: {
 }): Promise<ApiResponse<WritingListItem[]>> {
   const supabase = getSupabase();
   
-  // If Supabase not configured, return demo writing items
   if (!supabase) {
-    let items = [...demoWritingItems];
-    if (options?.featuredOnly) {
-      items = items.filter(item => item.featured);
-    }
-    if (options?.limit) {
-      items = items.slice(0, options.limit);
-    }
-    return { data: items, error: null };
+    return { data: null, error: 'Supabase not configured' };
   }
 
   try {
@@ -414,6 +515,9 @@ export async function getWritingItems(options?: {
     const { data, error } = await query;
 
     if (error) {
+      if (error.message.includes('does not exist')) {
+        return { data: null, error: 'Database schema not initialized. Run docs/sql/000_all.sql in Supabase.' };
+      }
       return { data: null, error: error.message };
     }
 
@@ -500,16 +604,16 @@ export async function adminUpdateSiteSettings(
       return { data: null, error: fetchError || 'Settings not found' };
     }
 
-    const updateData: Record<string, unknown> = {};
-    if (partial.nav_config) updateData.nav_config = partial.nav_config;
-    if (partial.home_sections) updateData.home_sections = partial.home_sections;
-    if (partial.theme) updateData.theme = partial.theme;
-    if (partial.seo) updateData.seo = partial.seo;
-    if (partial.pages) updateData.pages = partial.pages;
-
     const { data, error } = await supabase
       .from('site_settings')
-      .update(updateData)
+      .update({
+        nav_config: partial.nav_config,
+        home_sections: partial.home_sections,
+        theme: partial.theme,
+        seo: partial.seo,
+        pages: partial.pages,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', current.id)
       .select()
       .single();
@@ -518,9 +622,7 @@ export async function adminUpdateSiteSettings(
       return { data: null, error: error.message };
     }
 
-    // Invalidate cache after update
     invalidateCache('site_settings');
-
     return { data: transformSiteSettings(data), error: null };
   } catch (e) {
     return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
@@ -553,10 +655,40 @@ export async function adminListProjects(): Promise<ApiResponse<ExtendedProject[]
 }
 
 /**
- * Admin: Insert or update a project
+ * Admin: Get a single project by ID
  */
-export async function adminUpsertProject(
-  project: Partial<ExtendedProject> & { slug: string; title: string; summary: string }
+export async function adminGetProject(id: string): Promise<ApiResponse<ExtendedProject>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .select('*')
+      .eq('id', id)
+      .maybeSingle();
+
+    if (error) {
+      return { data: null, error: error.message };
+    }
+
+    if (!data) {
+      return { data: null, error: 'Project not found' };
+    }
+
+    return { data: transformProject(data), error: null };
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
+  }
+}
+
+/**
+ * Admin: Create a new project
+ */
+export async function adminCreateProject(
+  project: Omit<ExtendedProject, 'id' | 'updated_at'>
 ): Promise<ApiResponse<ExtendedProject>> {
   const supabase = getSupabase();
   if (!supabase) {
@@ -564,29 +696,23 @@ export async function adminUpsertProject(
   }
 
   try {
-    const upsertData: Record<string, unknown> = {
-      slug: project.slug,
-      title: project.title,
-      summary: project.summary,
-      tags: project.tags || [],
-      status: project.status || 'PUBLIC',
-      detail_level: project.detail_level || 'STANDARD',
-      featured: project.featured ?? false,
-      published: project.published ?? false,
-      sections_config: project.sections_config || {},
-      content: project.content || {},
-      media: project.media || [],
-      metrics: project.metrics || [],
-      decision_log: project.decision_log || [],
-    };
-
-    if (project.id) {
-      upsertData.id = project.id;
-    }
-
     const { data, error } = await supabase
       .from('projects')
-      .upsert(upsertData, { onConflict: 'slug' })
+      .insert({
+        slug: project.slug,
+        title: project.title,
+        summary: project.summary,
+        tags: project.tags,
+        status: project.status,
+        detail_level: project.detail_level,
+        featured: project.featured,
+        published: project.published,
+        sections_config: project.sections_config,
+        content: project.content,
+        media: project.media,
+        metrics: project.metrics,
+        decision_log: project.decision_log,
+      })
       .select()
       .single();
 
@@ -594,9 +720,41 @@ export async function adminUpsertProject(
       return { data: null, error: error.message };
     }
 
-    // Invalidate projects cache
     invalidateCache('published_projects');
+    return { data: transformProject(data), error: null };
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
+  }
+}
 
+/**
+ * Admin: Update a project
+ */
+export async function adminUpdateProject(
+  id: string,
+  partial: Partial<Omit<ExtendedProject, 'id' | 'updated_at'>>
+): Promise<ApiResponse<ExtendedProject>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('projects')
+      .update({
+        ...partial,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) {
+      return { data: null, error: error.message };
+    }
+
+    invalidateCache('published_projects');
     return { data: transformProject(data), error: null };
   } catch (e) {
     return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
@@ -613,18 +771,13 @@ export async function adminDeleteProject(id: string): Promise<ApiResponse<null>>
   }
 
   try {
-    const { error } = await supabase
-      .from('projects')
-      .delete()
-      .eq('id', id);
+    const { error } = await supabase.from('projects').delete().eq('id', id);
 
     if (error) {
       return { data: null, error: error.message };
     }
 
-    // Invalidate projects cache
     invalidateCache('published_projects');
-
     return { data: null, error: null };
   } catch (e) {
     return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
@@ -632,7 +785,41 @@ export async function adminDeleteProject(id: string): Promise<ApiResponse<null>>
 }
 
 /**
- * Admin: List all writing categories
+ * Admin: List all writing items
+ */
+export async function adminListWritingItems(): Promise<ApiResponse<WritingItemWithCategory[]>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('writing_items')
+      .select(`*, writing_categories(name)`)
+      .order('order_index');
+
+    if (error) {
+      return { data: null, error: error.message };
+    }
+
+    const items = (data || []).map(row => {
+      const category = row.writing_categories as { name: string } | null;
+      return {
+        ...row,
+        language: row.language as WritingLanguage,
+        category_name: category?.name,
+      };
+    });
+
+    return { data: items, error: null };
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
+  }
+}
+
+/**
+ * Admin: List writing categories
  */
 export async function adminListWritingCategories(): Promise<ApiResponse<WritingCategory[]>> {
   const supabase = getSupabase();
@@ -657,116 +844,10 @@ export async function adminListWritingCategories(): Promise<ApiResponse<WritingC
 }
 
 /**
- * Admin: Insert or update a writing category
+ * Admin: Create a writing item
  */
-export async function adminUpsertWritingCategory(
-  category: Partial<WritingCategory> & { name: string }
-): Promise<ApiResponse<WritingCategory>> {
-  const supabase = getSupabase();
-  if (!supabase) {
-    return { data: null, error: 'Supabase not configured' };
-  }
-
-  try {
-    const upsertData: Record<string, unknown> = {
-      name: category.name,
-      order_index: category.order_index ?? 0,
-      enabled: category.enabled ?? true,
-    };
-
-    if (category.id) {
-      upsertData.id = category.id;
-    }
-
-    const { data, error } = await supabase
-      .from('writing_categories')
-      .upsert(upsertData)
-      .select()
-      .single();
-
-    if (error) {
-      return { data: null, error: error.message };
-    }
-
-    return { data: data as WritingCategory, error: null };
-  } catch (e) {
-    return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
-  }
-}
-
-/**
- * Admin: Delete a writing category
- */
-export async function adminDeleteWritingCategory(id: string): Promise<ApiResponse<null>> {
-  const supabase = getSupabase();
-  if (!supabase) {
-    return { data: null, error: 'Supabase not configured' };
-  }
-
-  try {
-    const { error } = await supabase
-      .from('writing_categories')
-      .delete()
-      .eq('id', id);
-
-    if (error) {
-      return { data: null, error: error.message };
-    }
-
-    return { data: null, error: null };
-  } catch (e) {
-    return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
-  }
-}
-
-/**
- * Admin: List all writing items
- */
-export async function adminListWritingItems(): Promise<ApiResponse<WritingItemWithCategory[]>> {
-  const supabase = getSupabase();
-  if (!supabase) {
-    return { data: null, error: 'Supabase not configured' };
-  }
-
-  try {
-    const { data, error } = await supabase
-      .from('writing_items')
-      .select(`
-        *,
-        writing_categories(*)
-      `)
-      .order('order_index');
-
-    if (error) {
-      return { data: null, error: error.message };
-    }
-
-    const items: WritingItemWithCategory[] = (data || []).map(row => ({
-      id: row.id,
-      category_id: row.category_id,
-      title: row.title,
-      url: row.url,
-      platform_label: row.platform_label,
-      language: row.language as WritingLanguage,
-      featured: row.featured,
-      enabled: row.enabled,
-      order_index: row.order_index,
-      why_this_matters: row.why_this_matters,
-      show_why: row.show_why,
-      category: row.writing_categories as WritingCategory | undefined,
-    }));
-
-    return { data: items, error: null };
-  } catch (e) {
-    return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
-  }
-}
-
-/**
- * Admin: Insert or update a writing item
- */
-export async function adminUpsertWritingItem(
-  item: Partial<WritingItem> & { title: string; url: string }
+export async function adminCreateWritingItem(
+  item: Omit<WritingItem, 'id'>
 ): Promise<ApiResponse<WritingItem>> {
   const supabase = getSupabase();
   if (!supabase) {
@@ -774,26 +855,39 @@ export async function adminUpsertWritingItem(
   }
 
   try {
-    const upsertData: Record<string, unknown> = {
-      title: item.title,
-      url: item.url,
-      category_id: item.category_id || null,
-      platform_label: item.platform_label || '',
-      language: item.language || 'AUTO',
-      featured: item.featured ?? false,
-      enabled: item.enabled ?? true,
-      order_index: item.order_index ?? 0,
-      why_this_matters: item.why_this_matters || null,
-      show_why: item.show_why ?? false,
-    };
-
-    if (item.id) {
-      upsertData.id = item.id;
-    }
-
     const { data, error } = await supabase
       .from('writing_items')
-      .upsert(upsertData)
+      .insert(item)
+      .select()
+      .single();
+
+    if (error) {
+      return { data: null, error: error.message };
+    }
+
+    return { data: data as WritingItem, error: null };
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
+  }
+}
+
+/**
+ * Admin: Update a writing item
+ */
+export async function adminUpdateWritingItem(
+  id: string,
+  partial: Partial<Omit<WritingItem, 'id'>>
+): Promise<ApiResponse<WritingItem>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('writing_items')
+      .update(partial)
+      .eq('id', id)
       .select()
       .single();
 
@@ -810,6 +904,83 @@ export async function adminUpsertWritingItem(
 /**
  * Admin: Delete a writing item
  */
+/**
+ * Admin: Upsert a project (create or update)
+ */
+export async function adminUpsertProject(
+  project: Partial<ExtendedProject> & { slug: string; title: string }
+): Promise<ApiResponse<ExtendedProject>> {
+  if (project.id) {
+    return adminUpdateProject(project.id, project);
+  }
+  return adminCreateProject(project as Omit<ExtendedProject, 'id' | 'updated_at'>);
+}
+
+/**
+ * Admin: Upsert a writing category
+ */
+export async function adminUpsertWritingCategory(
+  category: Partial<WritingCategory> & { name: string }
+): Promise<ApiResponse<WritingCategory>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
+  try {
+    if (category.id) {
+      const { data, error } = await supabase
+        .from('writing_categories')
+        .update(category)
+        .eq('id', category.id)
+        .select()
+        .single();
+      if (error) return { data: null, error: error.message };
+      return { data: data as WritingCategory, error: null };
+    } else {
+      const { data, error } = await supabase
+        .from('writing_categories')
+        .insert(category)
+        .select()
+        .single();
+      if (error) return { data: null, error: error.message };
+      return { data: data as WritingCategory, error: null };
+    }
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
+  }
+}
+
+/**
+ * Admin: Delete a writing category
+ */
+export async function adminDeleteWritingCategory(id: string): Promise<ApiResponse<null>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
+  try {
+    const { error } = await supabase.from('writing_categories').delete().eq('id', id);
+    if (error) return { data: null, error: error.message };
+    return { data: null, error: null };
+  } catch (e) {
+    return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
+  }
+}
+
+/**
+ * Admin: Upsert a writing item
+ */
+export async function adminUpsertWritingItem(
+  item: Partial<WritingItem> & { title: string; url: string }
+): Promise<ApiResponse<WritingItem>> {
+  if (item.id) {
+    return adminUpdateWritingItem(item.id, item);
+  }
+  return adminCreateWritingItem(item as Omit<WritingItem, 'id'>);
+}
+
 export async function adminDeleteWritingItem(id: string): Promise<ApiResponse<null>> {
   const supabase = getSupabase();
   if (!supabase) {
@@ -817,10 +988,7 @@ export async function adminDeleteWritingItem(id: string): Promise<ApiResponse<nu
   }
 
   try {
-    const { error } = await supabase
-      .from('writing_items')
-      .delete()
-      .eq('id', id);
+    const { error } = await supabase.from('writing_items').delete().eq('id', id);
 
     if (error) {
       return { data: null, error: error.message };
