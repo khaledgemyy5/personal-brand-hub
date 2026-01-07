@@ -3,11 +3,19 @@ import { ExternalLink } from "lucide-react";
 import { getWritingCategories, getWritingItems, trackEvent } from "@/lib/db";
 import type { WritingCategory, WritingListItem } from "@/lib/types";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { ChevronDown } from "lucide-react";
 
 export default function Writing() {
   const [categories, setCategories] = useState<WritingCategory[]>([]);
   const [items, setItems] = useState<WritingListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadData() {
@@ -30,66 +38,34 @@ export default function Writing() {
     trackEvent({ event: "page_view", path: "/writing" });
   }, []);
 
-  // Group items by category
-  const groupedItems = useMemo(() => {
-    const groups: Record<string, WritingListItem[]> = {};
+  // Filter items by selected category
+  const filteredItems = useMemo(() => {
+    if (!selectedCategory) return items;
+    return items.filter(item => item.category_name === selectedCategory);
+  }, [items, selectedCategory]);
 
-    // Initialize groups for each category
-    categories.forEach((cat) => {
-      groups[cat.id] = [];
+  // Unique category names
+  const categoryNames = useMemo(() => {
+    const names = new Set<string>();
+    items.forEach(item => {
+      if (item.category_name) names.add(item.category_name);
     });
-
-    // Add uncategorized group
-    groups["uncategorized"] = [];
-
-    // Assign items to groups
-    items.forEach((item) => {
-      const key = item.category_name
-        ? categories.find((c) => c.name === item.category_name)?.id || "uncategorized"
-        : "uncategorized";
-      if (!groups[key]) groups[key] = [];
-      groups[key].push(item);
-    });
-
-    return groups;
-  }, [categories, items]);
-
-  // Order categories by order_index, uncategorized last
-  const orderedCategoryIds = useMemo(() => {
-    const catIds = categories
-      .sort((a, b) => a.order_index - b.order_index)
-      .map((c) => c.id);
-
-    // Add uncategorized at the end if it has items
-    if (groupedItems["uncategorized"]?.length > 0) {
-      catIds.push("uncategorized");
-    }
-
-    return catIds.filter((id) => groupedItems[id]?.length > 0);
-  }, [categories, groupedItems]);
+    return Array.from(names);
+  }, [items]);
 
   const handleItemClick = (item: WritingListItem) => {
     trackEvent({ event: "writing_click", path: item.url });
   };
 
-  const getCategoryName = (id: string) => {
-    if (id === "uncategorized") return "Uncategorized";
-    return categories.find((c) => c.id === id)?.name || "Uncategorized";
-  };
-
   if (loading) {
     return (
-      <div className="container-narrow section-spacing">
+      <div className="container-narrow py-16 md:py-24">
         <Skeleton className="h-10 w-48 mb-4" />
         <Skeleton className="h-5 w-96 mb-12" />
-        <div className="space-y-8">
-          <div>
-            <Skeleton className="h-6 w-32 mb-4" />
-            <div className="space-y-4">
-              <WritingItemSkeleton />
-              <WritingItemSkeleton />
-            </div>
-          </div>
+        <div className="space-y-4">
+          <WritingItemSkeleton />
+          <WritingItemSkeleton />
+          <WritingItemSkeleton />
         </div>
       </div>
     );
@@ -104,9 +80,9 @@ export default function Writing() {
           content="Selected writing and articles by Ammar. Thoughts on software engineering, product development, and technology."
         />
 
-        <div className="container-narrow section-spacing">
-          <h1 className="mb-4">Writing</h1>
-          <p className="text-muted-foreground">
+        <div className="container-narrow py-16 md:py-24">
+          <h1 className="text-3xl md:text-4xl font-serif font-medium mb-4">Writing</h1>
+          <p className="text-lg text-muted-foreground">
             No writing published yet. Check back soon.
           </p>
         </div>
@@ -122,28 +98,51 @@ export default function Writing() {
         content="Selected writing and articles by Ammar. Thoughts on software engineering, product development, and technology."
       />
 
-      <div className="container-narrow section-spacing">
-        <h1 className="mb-4">Writing</h1>
-        <p className="text-muted-foreground mb-12">
-          Selected articles and essays. All links point to external publications.
-        </p>
+      <div className="container-narrow py-16 md:py-24">
+        <header className="mb-12">
+          <h1 className="text-3xl md:text-4xl font-serif font-medium mb-4">Writing</h1>
+          <p className="text-lg text-muted-foreground max-w-lg">
+            Selected articles and essays. All links point to external publications.
+          </p>
+        </header>
 
-        <div className="space-y-12">
-          {orderedCategoryIds.map((categoryId) => (
-            <section key={categoryId}>
-              <h2 className="text-lg font-medium mb-6 text-foreground">
-                {getCategoryName(categoryId)}
-              </h2>
-              <div className="space-y-4">
-                {groupedItems[categoryId].map((item) => (
-                  <WritingItem
-                    key={item.id}
-                    item={item}
-                    onClick={() => handleItemClick(item)}
-                  />
-                ))}
-              </div>
-            </section>
+        {/* Category filter pills */}
+        {categoryNames.length > 1 && (
+          <div className="flex flex-wrap gap-2 mb-10">
+            <button
+              onClick={() => setSelectedCategory(null)}
+              className={`px-4 py-2 text-sm rounded-full border transition-all ${
+                selectedCategory === null
+                  ? "bg-foreground text-background border-foreground"
+                  : "bg-transparent text-muted-foreground border-border hover:border-foreground hover:text-foreground"
+              }`}
+            >
+              All
+            </button>
+            {categoryNames.map((name) => (
+              <button
+                key={name}
+                onClick={() => setSelectedCategory(name)}
+                className={`px-4 py-2 text-sm rounded-full border transition-all ${
+                  selectedCategory === name
+                    ? "bg-foreground text-background border-foreground"
+                    : "bg-transparent text-muted-foreground border-border hover:border-foreground hover:text-foreground"
+                }`}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Writing list */}
+        <div className="divide-y divide-border">
+          {filteredItems.map((item) => (
+            <WritingItem
+              key={item.id}
+              item={item}
+              onClick={() => handleItemClick(item)}
+            />
           ))}
         </div>
       </div>
@@ -160,6 +159,57 @@ function WritingItem({
 }) {
   const showWhy = item.show_why && item.why_this_matters;
   const isArabic = item.language === 'AR';
+  const [whyOpen, setWhyOpen] = useState(false);
+
+  if (showWhy) {
+    return (
+      <Collapsible open={whyOpen} onOpenChange={setWhyOpen} className="py-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-3 mb-1">
+              <a
+                href={item.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={onClick}
+                className="font-medium hover:text-accent transition-colors"
+                dir={isArabic ? 'rtl' : 'ltr'}
+                lang={isArabic ? 'ar' : undefined}
+              >
+                {item.title}
+              </a>
+              {isArabic && (
+                <Badge variant="outline" className="shrink-0 text-xs">AR</Badge>
+              )}
+            </div>
+            <CollapsibleTrigger className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors">
+              <ChevronDown className={`w-3.5 h-3.5 transition-transform ${whyOpen ? 'rotate-180' : ''}`} />
+              Why this matters
+            </CollapsibleTrigger>
+          </div>
+          <a
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={onClick}
+            className="flex items-center gap-2 shrink-0 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <span>{item.platform_label}</span>
+            <ExternalLink className="w-3.5 h-3.5" />
+          </a>
+        </div>
+        <CollapsibleContent className="pt-3">
+          <p 
+            className="text-sm text-muted-foreground pl-5 border-l-2 border-border"
+            dir={isArabic ? 'rtl' : 'ltr'}
+            lang={isArabic ? 'ar' : undefined}
+          >
+            {item.why_this_matters}
+          </p>
+        </CollapsibleContent>
+      </Collapsible>
+    );
+  }
 
   return (
     <a
@@ -167,31 +217,23 @@ function WritingItem({
       target="_blank"
       rel="noopener noreferrer"
       onClick={onClick}
-      className="block p-4 -mx-4 rounded-lg card-hover border border-transparent hover:border-border group"
+      className="flex items-center justify-between gap-4 py-5 group"
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1 min-w-0">
-          <h3
-            className="font-medium group-hover:text-accent transition-colors"
-            dir={isArabic ? 'rtl' : 'ltr'}
-            lang={isArabic ? 'ar' : undefined}
-          >
-            {item.title}
-          </h3>
-          {showWhy && (
-            <p 
-              className="text-sm text-muted-foreground mt-1" 
-              dir={isArabic ? 'rtl' : 'ltr'}
-              lang={isArabic ? 'ar' : undefined}
-            >
-              {item.why_this_matters}
-            </p>
-          )}
-        </div>
-        <div className="flex items-center gap-2 shrink-0 text-sm text-muted-foreground">
-          <span>{item.platform_label}</span>
-          <ExternalLink className="w-3.5 h-3.5" />
-        </div>
+      <div className="flex items-center gap-3 min-w-0">
+        <span
+          className="font-medium group-hover:text-accent transition-colors"
+          dir={isArabic ? 'rtl' : 'ltr'}
+          lang={isArabic ? 'ar' : undefined}
+        >
+          {item.title}
+        </span>
+        {isArabic && (
+          <Badge variant="outline" className="shrink-0 text-xs">AR</Badge>
+        )}
+      </div>
+      <div className="flex items-center gap-2 shrink-0 text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+        <span>{item.platform_label}</span>
+        <ExternalLink className="w-3.5 h-3.5" />
       </div>
     </a>
   );
@@ -199,12 +241,9 @@ function WritingItem({
 
 function WritingItemSkeleton() {
   return (
-    <div className="p-4 -mx-4">
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex-1">
-          <Skeleton className="h-5 w-3/4 mb-2" />
-          <Skeleton className="h-4 w-1/2" />
-        </div>
+    <div className="py-5">
+      <div className="flex items-center justify-between gap-4">
+        <Skeleton className="h-5 w-3/4" />
         <Skeleton className="h-4 w-16" />
       </div>
     </div>

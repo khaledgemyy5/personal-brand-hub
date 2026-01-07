@@ -1,24 +1,21 @@
 import { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Mail, Linkedin, Calendar } from "lucide-react";
+import { ArrowRight, Mail, Linkedin, Calendar, Download, Briefcase, Lightbulb, Users } from "lucide-react";
 import { getSiteSettings, getPublishedProjects, getWritingItems, trackEvent } from "@/lib/db";
+import { demoExperience, demoMethodology } from "@/lib/demoData";
 import type { SiteSettings, ProjectListItem, WritingListItem, HomeSectionConfig } from "@/lib/types";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 // Default home sections for fallback
 const defaultHomeSections: HomeSectionConfig[] = [
   { id: 'hero', visible: true, order: 1 },
   { id: 'experience_snapshot', visible: true, order: 2 },
-  { id: 'featured_projects', visible: true, order: 3 },
+  { id: 'featured_projects', visible: true, order: 3, limit: 3 },
   { id: 'how_i_work', visible: true, order: 4 },
-  { id: 'selected_writing_preview', visible: true, order: 5 },
+  { id: 'selected_writing_preview', visible: true, order: 5, limit: 3 },
   { id: 'contact_cta', visible: true, order: 6 },
 ];
-
-// Default SEO for fallback
-const defaultSeo = {
-  title: 'Ammar Jaber',
-  description: 'Technical Product Manager (ex‑LLM / Software Engineer)',
-};
 
 export default function Home() {
   const [settings, setSettings] = useState<SiteSettings | null>(null);
@@ -26,7 +23,7 @@ export default function Home() {
   const [writing, setWriting] = useState<WritingListItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Sorted visible sections - use defaults if settings is null
+  // Sorted visible sections
   const visibleSections = useMemo(() => {
     const sections = settings?.home_sections.sections ?? defaultHomeSections;
     return sections
@@ -38,18 +35,15 @@ export default function Home() {
     async function loadData() {
       setLoading(true);
       
-      // Load settings, projects, and writing in parallel
       const [settingsRes, projectsRes, writingRes] = await Promise.all([
         getSiteSettings(),
         getPublishedProjects({ limit: 3 }),
         getWritingItems({ featuredOnly: true, limit: 3 }),
       ]);
 
-      // Settings will always have data now (defaults returned on error)
       const loadedSettings = settingsRes.data;
       setSettings(loadedSettings);
 
-      // Filter to featured projects only
       if (projectsRes.data) {
         setProjects(projectsRes.data.filter(p => p.featured));
       }
@@ -58,43 +52,31 @@ export default function Home() {
       }
 
       setLoading(false);
-      
-      // Track page view
       trackEvent({ event: "page_view", path: "/" });
     }
 
     loadData();
   }, []);
 
-  // SEO data with fallbacks
-  const seoTitle = settings?.seo.title || defaultSeo.title;
-  const seoDescription = settings?.seo.description || defaultSeo.description;
+  const seoTitle = settings?.seo.title || 'Ammar Jaber';
+  const seoDescription = settings?.seo.description || 'Technical Product Manager (ex‑LLM / Software Engineer)';
 
-  // Render section by ID
   const renderSection = (section: HomeSectionConfig) => {
     switch (section.id) {
       case "hero":
         return <HeroSection key="hero" settings={settings} />;
-      
       case "experience_snapshot":
-        return <ExperienceSnapshotSection key="experience_snapshot" settings={settings} />;
-      
+        return <ExperienceSnapshotSection key="experience_snapshot" />;
       case "featured_projects":
-        // Auto-hide if no projects
         if (projects.length === 0) return null;
         return <FeaturedProjectsSection key="featured_projects" projects={projects} />;
-      
       case "how_i_work":
         return <HowIWorkSection key="how_i_work" settings={settings} />;
-      
       case "selected_writing_preview":
-        // Auto-hide if no writing items
         if (writing.length === 0) return null;
         return <SelectedWritingSection key="selected_writing_preview" items={writing} />;
-      
       case "contact_cta":
         return <ContactCtaSection key="contact_cta" settings={settings} />;
-      
       default:
         return null;
     }
@@ -102,9 +84,9 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className="container-narrow section-spacing">
+      <div className="container-narrow py-16 md:py-24">
         <div className="animate-pulse space-y-8">
-          <div className="h-12 bg-muted rounded w-3/4" />
+          <div className="h-16 bg-muted rounded w-3/4" />
           <div className="h-6 bg-muted rounded w-1/2" />
           <div className="h-32 bg-muted rounded" />
         </div>
@@ -114,11 +96,10 @@ export default function Home() {
 
   return (
     <>
-      {/* SEO Meta */}
       <title>{seoTitle}</title>
       <meta name="description" content={seoDescription} />
       
-      <div className="container-narrow section-spacing">
+      <div className="container-narrow py-16 md:py-24">
         {visibleSections.map(section => renderSection(section))}
       </div>
     </>
@@ -131,48 +112,56 @@ export default function Home() {
 
 function HeroSection({ settings }: { settings: SiteSettings | null }) {
   const seo = settings?.seo;
+  const resumeEnabled = settings?.pages?.resume?.enabled !== false;
   
   return (
-    <section className="mb-16">
-      <h1 className="text-balance mb-6">
-        {seo?.title || "Building products that matter."}
+    <section className="mb-20 md:mb-28">
+      <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif font-medium tracking-tight mb-6">
+        {seo?.title || "Ammar Jaber"}
       </h1>
-      <p className="text-lg text-muted-foreground max-w-xl leading-relaxed mb-8">
-        {seo?.description || "Software engineer focused on creating thoughtful, user-centered experiences."}
+      <p className="text-xl md:text-2xl text-muted-foreground mb-4">
+        Technical Product Manager
       </p>
-      <div className="flex items-center gap-4">
-        <Link 
-          to="/projects" 
-          className="inline-flex items-center gap-2 text-sm font-medium hover:text-accent transition-colors"
-        >
-          View projects
-          <ArrowRight className="w-4 h-4" />
-        </Link>
-        <Link 
-          to="/contact" 
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          Get in touch
-        </Link>
+      <p className="text-lg text-muted-foreground max-w-xl leading-relaxed mb-10">
+        {seo?.description || "Building products that solve real problems. Previously software engineer and LLM developer."}
+      </p>
+      <div className="flex flex-wrap items-center gap-4">
+        {resumeEnabled && (
+          <Button asChild size="lg" className="gap-2">
+            <Link to="/resume">
+              <Download className="w-4 h-4" />
+              Download Resume
+            </Link>
+          </Button>
+        )}
+        <Button asChild variant="outline" size="lg" className="gap-2">
+          <Link to="/projects">
+            View Projects
+            <ArrowRight className="w-4 h-4" />
+          </Link>
+        </Button>
       </div>
     </section>
   );
 }
 
-function ExperienceSnapshotSection({ settings }: { settings: SiteSettings | null }) {
-  // Could be extended to read from settings.pages.experience or similar
-  // For now, show a simple static snapshot
-  const hasContent = true; // Placeholder - check settings for real data
-  
-  if (!hasContent) return null;
-  
+function ExperienceSnapshotSection() {
   return (
-    <section className="mb-16">
-      <h2 className="text-xl mb-6">Experience</h2>
-      <p className="text-muted-foreground leading-relaxed">
-        Technical Product Manager with a background in software engineering and LLM development.
-        Focused on building products that solve real problems.
-      </p>
+    <section className="mb-20 md:mb-28">
+      <h2 className="text-2xl font-serif font-medium mb-8">Experience</h2>
+      <div className="space-y-8">
+        {demoExperience.map((exp, i) => (
+          <div key={i} className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-8">
+            <span className="text-sm text-muted-foreground shrink-0 w-32">
+              {exp.period}
+            </span>
+            <div>
+              <h3 className="font-medium">{exp.role}</h3>
+              <p className="text-muted-foreground">{exp.company}</p>
+            </div>
+          </div>
+        ))}
+      </div>
     </section>
   );
 }
@@ -183,40 +172,41 @@ function FeaturedProjectsSection({ projects }: { projects: ProjectListItem[] }) 
   };
 
   return (
-    <section className="mb-16">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl">Selected Projects</h2>
+    <section className="mb-20 md:mb-28">
+      <div className="flex items-center justify-between mb-8">
+        <h2 className="text-2xl font-serif font-medium">Featured Projects</h2>
         <Link 
           to="/projects" 
-          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          className="text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
         >
-          View all →
+          View all
+          <ArrowRight className="w-3.5 h-3.5" />
         </Link>
       </div>
       
-      <div className="space-y-4">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
         {projects.map(project => (
           <Link 
             key={project.id}
             to={`/projects/${project.slug}`}
             onClick={() => handleProjectClick(project.slug)}
-            className="block p-4 -mx-4 rounded-md card-hover"
+            className="group block p-6 rounded-lg border border-border hover:border-foreground/20 transition-colors"
           >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="font-serif text-lg font-medium mb-1">{project.title}</h3>
-                <p className="text-sm text-muted-foreground">{project.summary}</p>
-              </div>
+            <div className="flex items-start justify-between gap-2 mb-3">
+              <h3 className="font-serif text-lg font-medium group-hover:text-accent transition-colors">
+                {project.title}
+              </h3>
               {project.status === "CONFIDENTIAL" && (
-                <span className="text-xs text-muted-foreground shrink-0 uppercase tracking-wide">
-                  Confidential
-                </span>
+                <Badge variant="secondary" className="shrink-0 text-xs">Confidential</Badge>
               )}
             </div>
+            <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
+              {project.summary}
+            </p>
             {project.tags.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-3">
-                {project.tags.slice(0, 4).map(tag => (
-                  <span key={tag} className="text-xs text-muted-foreground bg-muted px-2 py-1 rounded">
+              <div className="flex flex-wrap gap-1.5">
+                {project.tags.slice(0, 3).map(tag => (
+                  <span key={tag} className="text-xs text-muted-foreground bg-secondary px-2 py-0.5 rounded">
                     {tag}
                   </span>
                 ))}
@@ -231,22 +221,28 @@ function FeaturedProjectsSection({ projects }: { projects: ProjectListItem[] }) 
 
 function HowIWorkSection({ settings }: { settings: SiteSettings | null }) {
   // Check for methodology in pages config
-  const methodology = (settings?.pages as { methodology?: string[] })?.methodology;
+  const methodology = (settings?.pages as { methodology?: string[] })?.methodology ?? demoMethodology;
   
-  // Hide if no methodology defined
-  if (!methodology || methodology.length === 0) return null;
-  
+  const principles = [
+    { icon: Briefcase, title: 'Start with why', description: methodology[0] || 'Every product decision ties back to user value.' },
+    { icon: Lightbulb, title: 'Ship fast, learn faster', description: methodology[1] || 'Small iterations, measurable outcomes.' },
+    { icon: Users, title: 'Build bridges', description: methodology[3] || 'Great products need engineers, designers, and stakeholders aligned.' },
+  ];
+
   return (
-    <section className="mb-16">
-      <h2 className="text-xl mb-6">How I Work</h2>
-      <ul className="space-y-3">
-        {methodology.map((item, i) => (
-          <li key={i} className="text-muted-foreground flex items-start gap-3">
-            <span className="text-accent">•</span>
-            {item}
-          </li>
+    <section className="mb-20 md:mb-28">
+      <h2 className="text-2xl font-serif font-medium mb-8">How I Work</h2>
+      <div className="grid gap-8 md:grid-cols-3">
+        {principles.map((item, i) => (
+          <div key={i}>
+            <item.icon className="w-6 h-6 text-muted-foreground mb-4" />
+            <h3 className="font-medium mb-2">{item.title}</h3>
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              {item.description}
+            </p>
+          </div>
         ))}
-      </ul>
+      </div>
     </section>
   );
 }
@@ -257,18 +253,19 @@ function SelectedWritingSection({ items }: { items: WritingListItem[] }) {
   };
 
   return (
-    <section className="mb-16">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-xl">Selected Writing</h2>
+    <section className="mb-20 md:mb-28">
+      <div className="flex items-center justify-between mb-8">
+        <h2 className="text-2xl font-serif font-medium">Selected Writing</h2>
         <Link 
           to="/writing" 
-          className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+          className="text-sm text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
         >
-          View all →
+          View all
+          <ArrowRight className="w-3.5 h-3.5" />
         </Link>
       </div>
       
-      <div className="space-y-4">
+      <div className="space-y-1">
         {items.map(item => (
           <a 
             key={item.id}
@@ -276,20 +273,22 @@ function SelectedWritingSection({ items }: { items: WritingListItem[] }) {
             target="_blank"
             rel="noopener noreferrer"
             onClick={() => handleWritingClick(item.url)}
-            className="block p-4 -mx-4 rounded-md card-hover"
-            dir="auto"
+            className="flex items-center justify-between gap-4 py-4 border-b border-border last:border-0 group hover:bg-secondary/30 -mx-4 px-4 transition-colors"
           >
-            <div className="flex items-center justify-between gap-4">
-              <h3 className="font-serif text-lg font-medium" dir="auto">{item.title}</h3>
-              <span className="text-sm text-muted-foreground shrink-0">
-                {item.platform_label || item.category_name} ↗
+            <div className="flex items-center gap-3 min-w-0">
+              <span 
+                className="font-medium group-hover:text-accent transition-colors truncate" 
+                dir="auto"
+              >
+                {item.title}
               </span>
+              {item.language === 'AR' && (
+                <Badge variant="outline" className="shrink-0 text-xs">AR</Badge>
+              )}
             </div>
-            {item.show_why && item.why_this_matters && (
-              <p className="text-sm text-muted-foreground mt-2" dir="auto">
-                {item.why_this_matters}
-              </p>
-            )}
+            <span className="text-sm text-muted-foreground shrink-0">
+              {item.platform_label} ↗
+            </span>
           </a>
         ))}
       </div>
@@ -298,75 +297,64 @@ function SelectedWritingSection({ items }: { items: WritingListItem[] }) {
 }
 
 function ContactCtaSection({ settings }: { settings: SiteSettings | null }) {
-  const contactConfig = settings?.pages.contact;
-  const email = contactConfig?.email;
-  
-  // Extended contact info (could be in pages config)
-  const pagesExtended = settings?.pages as { 
-    contact?: { 
-      enabled?: boolean;
-      email?: string; 
-      linkedin?: string; 
-      calendly?: string;
-    } 
-  };
-  const linkedin = pagesExtended?.contact?.linkedin;
-  const calendly = pagesExtended?.contact?.calendly;
+  const contactConfig = settings?.pages.contact as { 
+    enabled?: boolean;
+    email?: string; 
+    linkedin?: string; 
+    calendar?: string;
+  } | undefined;
 
-  // Hide if contact is disabled or no contact methods
-  if (!contactConfig?.enabled && !email) return null;
+  const email = contactConfig?.email;
+  const linkedin = contactConfig?.linkedin;
+  const calendar = contactConfig?.calendar;
 
   const handleContactClick = (type: string) => {
     trackEvent({ event: "contact_click", path: `/${type}` });
   };
 
   return (
-    <section className="mb-16">
-      <h2 className="text-xl mb-6">Get in Touch</h2>
-      <p className="text-muted-foreground mb-6">
-        Interested in working together or just want to say hello? Feel free to reach out.
+    <section className="pt-8 border-t border-border">
+      <h2 className="text-2xl md:text-3xl font-serif font-medium mb-4">
+        Ready to build something impactful?
+      </h2>
+      <p className="text-muted-foreground mb-8 max-w-lg">
+        Whether you have a project in mind or just want to chat about product and engineering, I'd love to hear from you.
       </p>
       <div className="flex flex-wrap items-center gap-4">
         {email && (
-          <a 
-            href={`mailto:${email}`}
-            onClick={() => handleContactClick("email")}
-            className="inline-flex items-center gap-2 text-sm font-medium hover:text-accent transition-colors"
-          >
-            <Mail className="w-4 h-4" />
-            Email
-          </a>
+          <Button asChild variant="default" size="lg" className="gap-2">
+            <a href={`mailto:${email}`} onClick={() => handleContactClick("email")}>
+              <Mail className="w-4 h-4" />
+              Email me
+            </a>
+          </Button>
         )}
         {linkedin && (
-          <a 
-            href={linkedin}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => handleContactClick("linkedin")}
-            className="inline-flex items-center gap-2 text-sm font-medium hover:text-accent transition-colors"
-          >
-            <Linkedin className="w-4 h-4" />
-            LinkedIn
-          </a>
+          <Button asChild variant="outline" size="lg" className="gap-2">
+            <a 
+              href={linkedin}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => handleContactClick("linkedin")}
+            >
+              <Linkedin className="w-4 h-4" />
+              LinkedIn
+            </a>
+          </Button>
         )}
-        {calendly && (
-          <a 
-            href={calendly}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={() => handleContactClick("calendly")}
-            className="inline-flex items-center gap-2 text-sm font-medium hover:text-accent transition-colors"
-          >
-            <Calendar className="w-4 h-4" />
-            Book a call
-          </a>
+        {calendar && (
+          <Button asChild variant="outline" size="lg" className="gap-2">
+            <a 
+              href={calendar}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => handleContactClick("calendar")}
+            >
+              <Calendar className="w-4 h-4" />
+              Book a chat
+            </a>
+          </Button>
         )}
-        <Link 
-          to="/contact" 
-          className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-        >
-          Contact page →
-        </Link>
       </div>
     </section>
   );

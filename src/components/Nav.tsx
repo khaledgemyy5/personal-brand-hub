@@ -42,39 +42,36 @@ export function Nav({ navConfig, hasProjects, hasWriting, resumeEnabled = true, 
   const showCta = ctaButton?.visible && ctaButton?.href && ctaButton?.label && 
     (ctaButton.href !== '/resume' || resumeEnabled !== false);
 
-  
-
   return (
-    <header className="border-b border-border">
-      <nav className="container-narrow py-6 flex items-center justify-between">
+    <header className="sticky top-0 z-50 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b border-border">
+      <nav className="container-narrow h-16 flex items-center justify-between">
         <Link 
           to="/" 
-          className="font-serif text-xl font-medium tracking-tight hover:text-accent transition-colors"
+          className="font-serif text-xl font-medium tracking-tight hover:opacity-70 transition-opacity"
         >
           Ammar
         </Link>
         
-        <div className="flex items-center gap-6">
+        <div className="flex items-center gap-8">
           {isLoading ? (
-            <div className="flex items-center gap-6">
+            <div className="flex items-center gap-8">
               <div className="flex items-center gap-6">
                 <Skeleton className="h-4 w-12" />
                 <Skeleton className="h-4 w-16" />
                 <Skeleton className="h-4 w-14" />
-                <Skeleton className="h-4 w-16" />
               </div>
-              <Skeleton className="h-8 w-20" />
+              <Skeleton className="h-9 w-24" />
             </div>
           ) : (
             <>
-              <ul className="flex items-center gap-6 text-sm">
+              <ul className="hidden sm:flex items-center gap-6 text-sm">
                 {visibleLinks.map((link) => (
                   <li key={link.href}>
                     <Link
                       to={link.href}
-                      className={`transition-colors hover:text-foreground ${
+                      className={`transition-opacity hover:opacity-70 ${
                         location.pathname === link.href
-                          ? "text-foreground"
+                          ? "text-foreground font-medium"
                           : "text-muted-foreground"
                       }`}
                     >
@@ -84,7 +81,7 @@ export function Nav({ navConfig, hasProjects, hasWriting, resumeEnabled = true, 
                 ))}
               </ul>
               {showCta && (
-                <Button asChild size="sm">
+                <Button asChild variant="outline" size="sm" className="font-medium">
                   <Link to={ctaButton.href}>{ctaButton.label}</Link>
                 </Button>
               )}
