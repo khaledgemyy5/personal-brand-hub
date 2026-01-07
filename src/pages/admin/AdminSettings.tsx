@@ -210,16 +210,22 @@ export default function AdminSettings() {
           variant: "destructive" 
         });
       } else if (data?.success) {
-        const msg = [
+        const parts = [
+          data.settings_updated ? 'Site settings updated' : null,
           data.projects_inserted > 0 ? `${data.projects_inserted} projects` : null,
           data.categories_inserted > 0 ? `${data.categories_inserted} categories` : null,
           data.items_inserted > 0 ? `${data.items_inserted} writing items` : null,
-        ].filter(Boolean).join(', ');
+        ].filter(Boolean);
         
         toast({ 
           title: "Demo content seeded!", 
-          description: msg || "Content already exists (no duplicates created).",
+          description: parts.length > 0 ? parts.join(', ') : "Content already exists (no duplicates created).",
         });
+        
+        // Reload settings to show updated values
+        if (data.settings_updated) {
+          window.location.reload();
+        }
       } else {
         toast({ 
           title: "Seed failed", 
