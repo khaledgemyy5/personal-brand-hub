@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
-import { Loader2, Plus, Trash2, ChevronUp, ChevronDown, Save, Upload } from "lucide-react";
-import { adminGetSiteSettings, adminUpdateSiteSettings } from "@/lib/db";
-import { supabase } from "@/lib/supabaseClient";
+import { Loader2, Plus, Trash2, ChevronUp, ChevronDown, Save, Upload, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
+import { adminGetSiteSettings, adminUpdateSiteSettings, supabaseReady } from "@/lib/db";
+import { getSupabase } from "@/lib/supabaseClient";
 import type {
   SiteSettings,
   NavLink,
@@ -31,8 +31,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { useToast } from "@/hooks/use-toast";
-
-import { isValidUrl, safeText, INPUT_LIMITS, sanitizeErrorMessage } from "@/lib/security";
+import { isValidUrl, sanitizeErrorMessage } from "@/lib/security";
 
 export default function AdminSettings() {
   const { toast } = useToast();
@@ -40,6 +39,16 @@ export default function AdminSettings() {
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [settings, setSettings] = useState<SiteSettings | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+
+  // Setup status
+  const [setupStatus, setSetupStatus] = useState({
+    envReady: supabaseReady,
+    dbReachable: false,
+    settingsExist: false,
+    isAdmin: false,
+    checking: true,
+  });
 
   // Local editable state
   const [navConfig, setNavConfig] = useState<NavConfig>({ links: [] });
@@ -48,10 +57,43 @@ export default function AdminSettings() {
   const [seo, setSeo] = useState<SEOConfig>({ title: "", description: "" });
   const [pages, setPages] = useState<PagesConfig>({});
 
+  const checkSetup = useCallback(async () => {
+    const supabase = getSupabase();
+    if (!supabase) {
+      setSetupStatus(s => ({ ...s, checking: false }));
+      return;
+    }
+
+    // Check DB reachable
+    const { data: viewData, error: viewError } = await supabase
+      .from('public_site_settings')
+      .select('id')
+      .limit(1)
+      .maybeSingle();
+
+    const dbReachable = !viewError;
+    const settingsExist = !!viewData;
+
+    // Check admin status via RPC
+    let isAdmin = false;
+    if (settingsExist) {
+      const { data: adminCheck } = await supabase.rpc('is_admin');
+      isAdmin = adminCheck === true;
+    }
+
+    setSetupStatus({ envReady: true, dbReachable, settingsExist, isAdmin, checking: false });
+  }, []);
+
+  useEffect(() => {
+    checkSetup();
+  }, [checkSetup]);
+
   useEffect(() => {
     async function load() {
       const res = await adminGetSiteSettings();
-      if (res.data) {
+      if (res.error) {
+        setSettingsError(res.error);
+      } else if (res.data) {
         setSettings(res.data);
         setNavConfig(res.data.nav_config || { links: [] });
         setHomeSections(res.data.home_sections?.sections || []);
@@ -103,28 +145,24 @@ export default function AdminSettings() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const supabase = getSupabase();
+    if (!supabase) {
+      toast({ title: "Supabase not configured", variant: "destructive" });
+      return;
+    }
+
     if (!file.type.includes("png") && !file.type.includes("ico") && !file.type.includes("icon")) {
-      toast({
-        title: "Invalid file type",
-        description: "Please upload a PNG or ICO file.",
-        variant: "destructive",
-      });
+      toast({ title: "Invalid file type", description: "Please upload a PNG or ICO file.", variant: "destructive" });
       return;
     }
 
     setUploading(true);
     const fileName = `favicon-${Date.now()}.${file.name.split(".").pop()}`;
 
-    const { data, error } = await supabase.storage
-      .from("assets")
-      .upload(fileName, file, { upsert: true });
+    const { data, error } = await supabase.storage.from("assets").upload(fileName, file, { upsert: true });
 
     if (error) {
-      toast({
-        title: "Upload failed",
-        description: sanitizeErrorMessage(error),
-        variant: "destructive",
-      });
+      toast({ title: "Upload failed", description: sanitizeErrorMessage(error), variant: "destructive" });
       setUploading(false);
       return;
     }
@@ -134,6 +172,27 @@ export default function AdminSettings() {
     toast({ title: "Favicon uploaded", description: "Remember to save changes." });
     setUploading(false);
   };
+
+  const handleClaimAdmin = async () => {
+    const supabase = getSupabase();
+    if (!supabase) return;
+
+    const { data, error } = await supabase.rpc('claim_admin');
+    if (error) {
+      toast({ title: "Claim failed", description: error.message, variant: "destructive" });
+    } else if (data?.success) {
+      toast({ title: "Admin claimed!", description: "You now have admin access." });
+      checkSetup();
+      window.location.reload();
+    } else {
+      toast({ title: "Claim failed", description: data?.error || "Unknown error", variant: "destructive" });
+    }
+  };
+
+  const StatusIcon = ({ ok }: { ok: boolean }) => 
+    ok ? <CheckCircle className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-red-500" />;
+
+  const canEdit = setupStatus.envReady && setupStatus.dbReachable && setupStatus.isAdmin;
 
   if (loading) {
     return (
@@ -145,12 +204,51 @@ export default function AdminSettings() {
 
   return (
     <div className="max-w-2xl">
+      {/* Setup Wizard Card */}
+      {(!setupStatus.isAdmin || settingsError) && (
+        <div className="mb-6 p-4 border border-border rounded-lg bg-muted/50">
+          <h2 className="text-lg font-medium mb-3 flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-amber-500" />
+            Setup Status
+          </h2>
+          <ul className="space-y-2 text-sm mb-4">
+            <li className="flex items-center gap-2">
+              <StatusIcon ok={setupStatus.envReady} />
+              Env vars (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY)
+            </li>
+            <li className="flex items-center gap-2">
+              <StatusIcon ok={setupStatus.dbReachable} />
+              Supabase reachable
+            </li>
+            <li className="flex items-center gap-2">
+              <StatusIcon ok={setupStatus.settingsExist} />
+              site_settings row exists
+            </li>
+            <li className="flex items-center gap-2">
+              <StatusIcon ok={setupStatus.isAdmin} />
+              Admin claimed
+            </li>
+          </ul>
+          {setupStatus.envReady && setupStatus.settingsExist && !setupStatus.isAdmin && (
+            <Button onClick={handleClaimAdmin} className="gap-2">
+              <CheckCircle className="w-4 h-4" /> Claim Admin
+            </Button>
+          )}
+          {!setupStatus.envReady && (
+            <p className="text-muted-foreground text-sm">Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY first.</p>
+          )}
+          {setupStatus.envReady && !setupStatus.settingsExist && (
+            <p className="text-muted-foreground text-sm">Run docs/sql/000_all.sql in Supabase SQL Editor.</p>
+          )}
+        </div>
+      )}
+
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-serif font-medium mb-2">Settings</h1>
           <p className="text-muted-foreground">Manage site configuration.</p>
         </div>
-        <Button onClick={handleSave} disabled={saving} className="gap-2">
+        <Button onClick={handleSave} disabled={saving || !canEdit} className="gap-2">
           {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           Save Changes
         </Button>

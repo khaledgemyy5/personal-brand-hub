@@ -3,7 +3,8 @@
 // All functions return { data, error } pattern
 // =============================================================================
 
-import { supabase } from './supabaseClient';
+import { getSupabase, supabaseReady } from './supabaseClient';
+import { defaultSiteSettings } from './defaultSiteSettings';
 import type {
   ApiResponse,
   SiteSettings,
@@ -32,6 +33,9 @@ import {
   type MediaItem,
   type DecisionLogEntry,
 } from './runtime';
+
+// Re-export for convenience
+export { supabaseReady } from './supabaseClient';
 
 // -----------------------------------------------------------------------------
 // Simple in-memory cache
@@ -137,50 +141,52 @@ function transformProject(row: Record<string, unknown>): ExtendedProject {
 // PUBLIC READ FUNCTIONS
 // =============================================================================
 
-// -----------------------------------------------------------------------------
-// Default site settings for fallback (no Supabase or no row)
-// -----------------------------------------------------------------------------
-
-const defaultSiteSettings: SiteSettings = {
-  id: 'default',
-  admin_user_id: '',
-  nav_config: {
-    links: [
-      { href: '/', label: 'Home', visible: true },
-      { href: '/projects', label: 'Projects', visible: true },
-      { href: '/writing', label: 'Writing', visible: true },
-      { href: '/contact', label: 'Contact', visible: true },
-    ],
-    ctaButton: { href: '/resume', label: 'Resume', visible: true },
-  },
-  home_sections: {
-    sections: [
-      { id: 'hero', visible: true, order: 1 },
-      { id: 'experience_snapshot', visible: true, order: 2 },
-      { id: 'featured_projects', visible: true, order: 3 },
-      { id: 'how_i_work', visible: true, order: 4 },
-      { id: 'selected_writing_preview', visible: true, order: 5 },
-      { id: 'contact_cta', visible: true, order: 6 },
-    ],
-  },
-  theme: { mode: 'light', accentColor: '#135BEC' },
-  seo: { title: 'Ammar Jaber', description: 'Technical Product Manager (ex‑LLM / Software Engineer)' },
-  pages: {
-    resume: { enabled: true, pdfUrl: null, showCopyText: true, showDownload: true },
-    contact: { enabled: true, email: 'ammar@example.com', showForm: false },
-  },
-  updated_at: new Date().toISOString(),
-};
-
 /**
  * Fetch site settings from public_site_settings view - cached for 60s
- * Returns error if Supabase is unavailable or no row exists (no silent fallback)
+ * For PUBLIC pages: returns defaultSiteSettings on any error (graceful fallback)
+ * Use getSiteSettingsStrict() for admin pages that need real data
  */
 export async function getSiteSettings(): Promise<ApiResponse<SiteSettings>> {
   const cacheKey = 'site_settings';
   const cached = getCached<SiteSettings>(cacheKey);
   if (cached) {
     return { data: cached, error: null };
+  }
+
+  // If Supabase not ready, return defaults silently for public pages
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: defaultSiteSettings, error: null };
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('public_site_settings')
+      .select('*')
+      .limit(1)
+      .single();
+
+    if (error || !data) {
+      // Return defaults for public pages
+      return { data: defaultSiteSettings, error: null };
+    }
+
+    const settings = transformSiteSettings(data);
+    setCache(cacheKey, settings);
+    return { data: settings, error: null };
+  } catch (e) {
+    // Return defaults for public pages
+    return { data: defaultSiteSettings, error: null };
+  }
+}
+
+/**
+ * Strict version for admin pages - returns actual errors
+ */
+export async function getSiteSettingsStrict(): Promise<ApiResponse<SiteSettings>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.' };
   }
 
   try {
@@ -191,21 +197,17 @@ export async function getSiteSettings(): Promise<ApiResponse<SiteSettings>> {
       .single();
 
     if (error) {
-      console.warn('[getSiteSettings] Query failed:', error.message);
-      return { data: null, error: 'Site settings not configured. Check Supabase env vars + seed.' };
+      console.warn('[getSiteSettingsStrict] Query failed:', error.message);
+      return { data: null, error: 'Site settings not configured. Run docs/sql/000_all.sql in Supabase.' };
     }
 
     if (!data) {
-      console.warn('[getSiteSettings] No site_settings row found.');
-      return { data: null, error: 'No site_settings row found. Run seed SQL.' };
+      return { data: null, error: 'No site_settings row found. Run docs/sql/000_all.sql in Supabase.' };
     }
 
-    const settings = transformSiteSettings(data);
-    setCache(cacheKey, settings);
-    return { data: settings, error: null };
+    return { data: transformSiteSettings(data), error: null };
   } catch (e) {
-    console.warn('[getSiteSettings] Error:', e instanceof Error ? e.message : 'Unknown error');
-    return { data: null, error: 'Failed to load site settings. Check Supabase connection.' };
+    return { data: null, error: e instanceof Error ? e.message : 'Unknown error' };
   }
 }
 
@@ -216,6 +218,11 @@ export async function getPublishedProjects(options?: {
   limit?: number;
   tag?: string;
 }): Promise<ApiResponse<ProjectListItem[]>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: [], error: null };
+  }
+
   // Cache key includes limit (tag filtering is done post-fetch)
   const cacheKey = `published_projects_${options?.limit || 'all'}`;
   const cached = getCached<ProjectListItem[]>(cacheKey);
@@ -278,6 +285,11 @@ export async function getPublishedProjects(options?: {
  * Fetch a single project by slug
  */
 export async function getProjectBySlug(slug: string): Promise<ApiResponse<ExtendedProject>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
   try {
     const { data, error } = await supabase
       .from('projects')
@@ -304,6 +316,11 @@ export async function getProjectBySlug(slug: string): Promise<ApiResponse<Extend
  * Fetch enabled writing categories - cached for 60s
  */
 export async function getWritingCategories(): Promise<ApiResponse<WritingCategory[]>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: [], error: null };
+  }
+
   const cacheKey = 'writing_categories';
   const cached = getCached<WritingCategory[]>(cacheKey);
   if (cached) {
@@ -336,6 +353,11 @@ export async function getWritingItems(options?: {
   featuredOnly?: boolean;
   limit?: number;
 }): Promise<ApiResponse<WritingListItem[]>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: [], error: null };
+  }
+
   try {
     let query = supabase
       .from('writing_items')
@@ -393,6 +415,11 @@ export async function trackEvent(params: {
   path: string;
   ref?: string;
 }): Promise<ApiResponse<null>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: null }; // Silent fail for analytics
+  }
+
   try {
     const { error } = await supabase.from('analytics_events').insert({
       event: params.event,
@@ -416,10 +443,10 @@ export async function trackEvent(params: {
 // =============================================================================
 
 /**
- * Admin: Get site settings (same as public but may include more fields later)
+ * Admin: Get site settings - uses strict version that returns errors
  */
 export async function adminGetSiteSettings(): Promise<ApiResponse<SiteSettings>> {
-  return getSiteSettings();
+  return getSiteSettingsStrict();
 }
 
 /**
@@ -428,9 +455,14 @@ export async function adminGetSiteSettings(): Promise<ApiResponse<SiteSettings>>
 export async function adminUpdateSiteSettings(
   partial: Partial<Omit<SiteSettings, 'id' | 'admin_user_id' | 'updated_at'>>
 ): Promise<ApiResponse<SiteSettings>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
   try {
     // Get current settings to get the ID
-    const { data: current, error: fetchError } = await getSiteSettings();
+    const { data: current, error: fetchError } = await getSiteSettingsStrict();
     if (fetchError || !current) {
       return { data: null, error: fetchError || 'Settings not found' };
     }
@@ -466,6 +498,11 @@ export async function adminUpdateSiteSettings(
  * Admin: List all projects (including unpublished)
  */
 export async function adminListProjects(): Promise<ApiResponse<ExtendedProject[]>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
   try {
     const { data, error } = await supabase
       .from('projects')
@@ -488,6 +525,11 @@ export async function adminListProjects(): Promise<ApiResponse<ExtendedProject[]
 export async function adminUpsertProject(
   project: Partial<ExtendedProject> & { slug: string; title: string; summary: string }
 ): Promise<ApiResponse<ExtendedProject>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
   try {
     const upsertData: Record<string, unknown> = {
       slug: project.slug,
@@ -532,6 +574,11 @@ export async function adminUpsertProject(
  * Admin: Delete a project
  */
 export async function adminDeleteProject(id: string): Promise<ApiResponse<null>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
   try {
     const { error } = await supabase
       .from('projects')
@@ -555,6 +602,11 @@ export async function adminDeleteProject(id: string): Promise<ApiResponse<null>>
  * Admin: List all writing categories
  */
 export async function adminListWritingCategories(): Promise<ApiResponse<WritingCategory[]>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
   try {
     const { data, error } = await supabase
       .from('writing_categories')
@@ -577,6 +629,11 @@ export async function adminListWritingCategories(): Promise<ApiResponse<WritingC
 export async function adminUpsertWritingCategory(
   category: Partial<WritingCategory> & { name: string }
 ): Promise<ApiResponse<WritingCategory>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
   try {
     const upsertData: Record<string, unknown> = {
       name: category.name,
@@ -608,6 +665,11 @@ export async function adminUpsertWritingCategory(
  * Admin: Delete a writing category
  */
 export async function adminDeleteWritingCategory(id: string): Promise<ApiResponse<null>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
   try {
     const { error } = await supabase
       .from('writing_categories')
@@ -628,6 +690,11 @@ export async function adminDeleteWritingCategory(id: string): Promise<ApiRespons
  * Admin: List all writing items
  */
 export async function adminListWritingItems(): Promise<ApiResponse<WritingItemWithCategory[]>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
   try {
     const { data, error } = await supabase
       .from('writing_items')
@@ -668,6 +735,11 @@ export async function adminListWritingItems(): Promise<ApiResponse<WritingItemWi
 export async function adminUpsertWritingItem(
   item: Partial<WritingItem> & { title: string; url: string }
 ): Promise<ApiResponse<WritingItem>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
   try {
     const upsertData: Record<string, unknown> = {
       title: item.title,
@@ -706,6 +778,11 @@ export async function adminUpsertWritingItem(
  * Admin: Delete a writing item
  */
 export async function adminDeleteWritingItem(id: string): Promise<ApiResponse<null>> {
+  const supabase = getSupabase();
+  if (!supabase) {
+    return { data: null, error: 'Supabase not configured' };
+  }
+
   try {
     const { error } = await supabase
       .from('writing_items')
