@@ -1,22 +1,56 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { FolderOpen, FileText, Eye, Settings, LogOut, Loader2, CheckCircle, XCircle, RefreshCw, Clock } from "lucide-react";
-import { getSupabase } from "@/lib/supabaseClient";
+import { FolderOpen, FileText, Eye, Settings, LogOut, Loader2, CheckCircle, XCircle, RefreshCw, Clock, Database, Server, Shield, User } from "lucide-react";
+import { getSupabase, getEnvStatus, checkSupabaseConnection } from "@/lib/supabaseClient";
 import { signOut } from "@/lib/adminAuth";
 import { adminListProjects, adminListWritingItems, adminHealthCheck, type HealthCheckResult } from "@/lib/db";
 import { Button } from "@/components/ui/button";
-import type { User } from "@supabase/supabase-js";
+import type { User as SupabaseUser } from "@supabase/supabase-js";
+
+interface QuickDiagnostics {
+  envReady: boolean;
+  connected: boolean;
+  schemaReady: boolean;
+  authWorking: boolean;
+  userEmail?: string;
+  error?: string;
+  timestamp: string;
+}
 
 export default function AdminDashboard() {
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<SupabaseUser | null>(null);
   const [projectCount, setProjectCount] = useState<number | null>(null);
   const [writingCount, setWritingCount] = useState<number | null>(null);
   const [signingOut, setSigningOut] = useState(false);
   const [healthCheck, setHealthCheck] = useState<HealthCheckResult | null>(null);
+  const [quickDiag, setQuickDiag] = useState<QuickDiagnostics | null>(null);
   const [healthLoading, setHealthLoading] = useState(false);
+
+  const loadQuickDiagnostics = async () => {
+    const envStatus = getEnvStatus();
+    const connectionResult = await checkSupabaseConnection();
+    
+    const supabase = getSupabase();
+    let userEmail: string | undefined;
+    if (supabase) {
+      const { data } = await supabase.auth.getUser();
+      userEmail = data.user?.email;
+    }
+
+    setQuickDiag({
+      envReady: envStatus.ready,
+      connected: connectionResult.connected,
+      schemaReady: connectionResult.schemaReady,
+      authWorking: connectionResult.authWorking,
+      userEmail,
+      error: connectionResult.error,
+      timestamp: new Date().toISOString(),
+    });
+  };
 
   const loadHealthCheck = async () => {
     setHealthLoading(true);
+    await loadQuickDiagnostics();
     const result = await adminHealthCheck();
     setHealthCheck(result);
     setHealthLoading(false);
@@ -38,7 +72,7 @@ export default function AdminDashboard() {
       }
     );
 
-    // Load health check
+    // Load diagnostics
     loadHealthCheck();
   }, []);
 
@@ -94,55 +128,90 @@ export default function AdminDashboard() {
         <StatCard label="Status" value="Live" icon={Settings} />
       </div>
 
-      {/* Supabase Connection Status */}
-      <section className="mb-8">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-medium">Supabase Connection Status</h2>
-          <Button 
-            variant="ghost" 
-            size="sm" 
-            onClick={loadHealthCheck}
-            disabled={healthLoading}
-            className="gap-2"
-          >
-            {healthLoading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <RefreshCw className="w-4 h-4" />
-            )}
-            Refresh
-          </Button>
-        </div>
-        
-        {healthCheck ? (
-          <div className="border border-border rounded-lg bg-card p-4 space-y-3">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-              <StatusItem label="Environment" ok={healthCheck.env.ok} message={healthCheck.env.message} />
-              <StatusItem label="Schema" ok={healthCheck.schema.ok} message={healthCheck.schema.message} />
-              <StatusItem label="Auth" ok={healthCheck.auth.ok} message={healthCheck.auth.email || healthCheck.auth.message} />
-              <StatusItem label="RLS" ok={healthCheck.rls.ok} message={healthCheck.rls.message} />
+      {/* Quick Connection Status */}
+      {quickDiag && (
+        <section className="mb-8">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-medium flex items-center gap-2">
+              <Database className="w-5 h-5" />
+              Supabase Connection
+            </h2>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={loadHealthCheck}
+              disabled={healthLoading}
+              className="gap-2"
+            >
+              {healthLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4" />
+              )}
+              Refresh
+            </Button>
+          </div>
+          
+          <div className="border border-border rounded-lg bg-card p-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+              <QuickStatusItem 
+                icon={Server} 
+                label="Environment" 
+                ok={quickDiag.envReady} 
+                status={quickDiag.envReady ? "Configured" : "Missing vars"} 
+              />
+              <QuickStatusItem 
+                icon={Database} 
+                label="Connection" 
+                ok={quickDiag.connected} 
+                status={quickDiag.connected ? "Connected" : "Failed"} 
+              />
+              <QuickStatusItem 
+                icon={Shield} 
+                label="Schema" 
+                ok={quickDiag.schemaReady} 
+                status={quickDiag.schemaReady ? "Ready" : "Not initialized"} 
+              />
+              <QuickStatusItem 
+                icon={User} 
+                label="Auth" 
+                ok={quickDiag.authWorking} 
+                status={quickDiag.userEmail || (quickDiag.authWorking ? "Working" : "Failed")} 
+              />
             </div>
-            
-            <div className="pt-3 border-t border-border">
-              <p className="text-xs text-muted-foreground font-medium mb-2">Tables</p>
+
+            {quickDiag.error && (
+              <div className="p-3 rounded bg-destructive/10 border border-destructive/20 mb-4">
+                <p className="text-xs text-destructive font-mono">{quickDiag.error}</p>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 text-xs text-muted-foreground pt-3 border-t border-border">
+              <Clock className="w-3 h-3" />
+              Last checked: {new Date(quickDiag.timestamp).toLocaleTimeString()}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* Detailed Health Check */}
+      {healthCheck && (
+        <section className="mb-8">
+          <details className="group">
+            <summary className="cursor-pointer text-sm text-muted-foreground hover:text-foreground flex items-center gap-2 mb-2">
+              <span>Detailed table status</span>
+              <span className="text-xs">(click to expand)</span>
+            </summary>
+            <div className="border border-border rounded-lg bg-card p-4 mt-2">
               <div className="grid grid-cols-3 gap-4">
                 <StatusItem label="site_settings" ok={healthCheck.tables.site_settings.ok} message={healthCheck.tables.site_settings.message} compact />
                 <StatusItem label="projects" ok={healthCheck.tables.projects.ok} message={healthCheck.tables.projects.message} compact />
                 <StatusItem label="writing_items" ok={healthCheck.tables.writing_items.ok} message={healthCheck.tables.writing_items.message} compact />
               </div>
             </div>
-
-            <div className="pt-3 border-t border-border flex items-center gap-2 text-xs text-muted-foreground">
-              <Clock className="w-3 h-3" />
-              Last checked: {new Date(healthCheck.timestamp).toLocaleTimeString()}
-            </div>
-          </div>
-        ) : (
-          <div className="border border-border rounded-lg bg-card p-6 text-center">
-            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground mx-auto" />
-          </div>
-        )}
-      </section>
+          </details>
+        </section>
+      )}
 
       {/* Quick Actions */}
       <section className="mb-8">
@@ -164,6 +233,37 @@ export default function AdminDashboard() {
           </p>
         </div>
       </section>
+    </div>
+  );
+}
+
+function QuickStatusItem({ 
+  icon: Icon, 
+  label, 
+  ok, 
+  status 
+}: { 
+  icon: React.ElementType;
+  label: string; 
+  ok: boolean; 
+  status: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <Icon className="w-4 h-4 text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">{label}</span>
+      </div>
+      <div className="flex items-center gap-2">
+        {ok ? (
+          <CheckCircle className="w-4 h-4 text-green-600" />
+        ) : (
+          <XCircle className="w-4 h-4 text-red-500" />
+        )}
+        <span className={`text-sm font-medium truncate ${ok ? 'text-foreground' : 'text-red-500'}`} title={status}>
+          {status}
+        </span>
+      </div>
     </div>
   );
 }

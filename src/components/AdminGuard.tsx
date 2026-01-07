@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { Outlet, Link, useNavigate } from "react-router-dom";
-import { getSupabase, isSupabaseConfigured } from "@/lib/supabaseClient";
+import { getSupabase, isSupabaseConfigured, getEnvStatus, checkSupabaseConnection } from "@/lib/supabaseClient";
 import { checkIsAdmin, signInWithEmail, signOut } from "@/lib/adminAuth";
 import type { User, Session } from "@supabase/supabase-js";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, LogOut, AlertTriangle, CheckCircle, XCircle, ArrowLeft, Key, Lock } from "lucide-react";
+import { Loader2, LogOut, AlertTriangle, CheckCircle, XCircle, ArrowLeft, Key, Lock, RefreshCw, Database, Server, Shield } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 // Status icon component
@@ -19,6 +19,15 @@ const StatusIcon = ({ ok }: { ok: boolean }) => {
 
 type SchemaStatus = "checking" | "missing" | "ready" | "error";
 
+interface ConnectionDiagnostics {
+  envReady: boolean;
+  connected: boolean;
+  schemaReady: boolean;
+  authWorking: boolean;
+  error?: string;
+  envDetails: ReturnType<typeof getEnvStatus>;
+}
+
 export function AdminGuard() {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -26,90 +35,88 @@ export function AdminGuard() {
   const [loading, setLoading] = useState(true);
   const [schemaStatus, setSchemaStatus] = useState<SchemaStatus>("checking");
   const [isBootstrapped, setIsBootstrapped] = useState<boolean | null>(null);
+  const [diagnostics, setDiagnostics] = useState<ConnectionDiagnostics | null>(null);
+
+  const runDiagnostics = async (): Promise<ConnectionDiagnostics> => {
+    const envStatus = getEnvStatus();
+    
+    if (!envStatus.ready) {
+      return {
+        envReady: false,
+        connected: false,
+        schemaReady: false,
+        authWorking: false,
+        error: `Missing environment variables: ${envStatus.missingVars.join(', ')}`,
+        envDetails: envStatus,
+      };
+    }
+
+    const connectionResult = await checkSupabaseConnection();
+    
+    return {
+      envReady: true,
+      connected: connectionResult.connected,
+      schemaReady: connectionResult.schemaReady,
+      authWorking: connectionResult.authWorking,
+      error: connectionResult.error,
+      envDetails: envStatus,
+    };
+  };
 
   useEffect(() => {
-    // If env vars missing, show setup immediately
-    if (!isSupabaseConfigured) {
-      setSchemaStatus("missing");
-      setLoading(false);
-      return;
-    }
-
-    const supabase = getSupabase();
-    if (!supabase) {
-      setSchemaStatus("missing");
-      setLoading(false);
-      return;
-    }
-
-    // Check schema by querying site_settings
-    const checkSchema = async () => {
-      try {
-        const { error } = await supabase
-          .from('site_settings')
-          .select('id')
-          .limit(1);
-        
-        if (error) {
-          // Check if it's a "relation does not exist" error
-          if (error.message.includes('does not exist') || error.code === '42P01') {
-            setSchemaStatus("missing");
-            return false;
-          }
-          // Other errors (RLS, etc) mean schema exists
-          setSchemaStatus("ready");
-          return true;
-        }
-        
-        setSchemaStatus("ready");
-        return true;
-      } catch {
-        setSchemaStatus("error");
-        return false;
-      }
-    };
-
-    // Check if site is bootstrapped
-    const checkBootstrap = async () => {
-      try {
-        const { data } = await supabase
-          .from('public_site_settings')
-          .select('is_bootstrapped')
-          .limit(1)
-          .maybeSingle();
-        
-        setIsBootstrapped(data?.is_bootstrapped ?? false);
-      } catch {
-        setIsBootstrapped(false);
-      }
-    };
-
-    // Set up auth state listener FIRST
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-
-        // Defer admin check with setTimeout to avoid deadlock
-        if (session?.user) {
-          setTimeout(() => {
-            checkIsAdmin(session.user.id).then(setIsAdmin);
-          }, 0);
-        } else {
-          setIsAdmin(null);
-        }
-      }
-    );
-
-    // THEN check schema, session, and bootstrap status
     const init = async () => {
-      const schemaReady = await checkSchema();
-      
-      if (!schemaReady) {
+      // Run diagnostics first
+      const diag = await runDiagnostics();
+      setDiagnostics(diag);
+
+      // If env vars missing or schema not ready, show setup immediately
+      if (!diag.envReady || !diag.schemaReady) {
+        setSchemaStatus(diag.schemaReady ? "ready" : "missing");
         setLoading(false);
         return;
       }
 
+      setSchemaStatus("ready");
+
+      const supabase = getSupabase();
+      if (!supabase) {
+        setLoading(false);
+        return;
+      }
+
+      // Check if site is bootstrapped
+      const checkBootstrap = async () => {
+        try {
+          const { data } = await supabase
+            .from('public_site_settings')
+            .select('is_bootstrapped')
+            .limit(1)
+            .maybeSingle();
+          
+          setIsBootstrapped(data?.is_bootstrapped ?? false);
+        } catch {
+          setIsBootstrapped(false);
+        }
+      };
+
+      // Set up auth state listener
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(
+        (event, session) => {
+          setSession(session);
+          setUser(session?.user ?? null);
+
+          // Defer admin check with setTimeout to avoid deadlock
+          if (session?.user) {
+            setTimeout(() => {
+              checkIsAdmin(session.user.id).then(setIsAdmin);
+            }, 0);
+          } else {
+            setIsAdmin(null);
+          }
+        }
+      );
+
+      // Get initial session and bootstrap status
       await checkBootstrap();
       
       const { data: { session } } = await supabase.auth.getSession();
@@ -122,11 +129,11 @@ export function AdminGuard() {
       }
       
       setLoading(false);
+
+      return () => subscription.unsubscribe();
     };
 
     init();
-
-    return () => subscription.unsubscribe();
   }, []);
 
   if (loading) {
@@ -134,15 +141,23 @@ export function AdminGuard() {
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-muted/30 via-background to-muted/50">
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-          <p className="text-sm text-muted-foreground">Loading...</p>
+          <p className="text-sm text-muted-foreground">Checking connection...</p>
         </div>
       </div>
     );
   }
 
   // Show setup if env vars missing OR schema not initialized
-  if (!isSupabaseConfigured || schemaStatus === "missing") {
-    return <AdminSetup envReady={isSupabaseConfigured} schemaReady={schemaStatus === "ready"} />;
+  if (!isSupabaseConfigured || schemaStatus === "missing" || (diagnostics && (!diagnostics.envReady || !diagnostics.schemaReady))) {
+    return <AdminSetup diagnostics={diagnostics} onRetry={async () => {
+      setLoading(true);
+      const diag = await runDiagnostics();
+      setDiagnostics(diag);
+      if (diag.envReady && diag.schemaReady) {
+        setSchemaStatus("ready");
+      }
+      setLoading(false);
+    }} />;
   }
 
   // Not signed in - show login
@@ -272,10 +287,23 @@ function AdminLogin() {
   );
 }
 
-function AdminSetup({ envReady, schemaReady }: { envReady: boolean; schemaReady: boolean }) {
+function AdminSetup({ diagnostics, onRetry }: { diagnostics: ConnectionDiagnostics | null; onRetry: () => void }) {
+  const [retrying, setRetrying] = useState(false);
+
+  const handleRetry = async () => {
+    setRetrying(true);
+    await onRetry();
+    setRetrying(false);
+  };
+
+  const envReady = diagnostics?.envReady ?? false;
+  const schemaReady = diagnostics?.schemaReady ?? false;
+  const connected = diagnostics?.connected ?? false;
+  const error = diagnostics?.error;
+
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-muted/30 via-background to-muted/50">
-      <div className="w-full max-w-md">
+      <div className="w-full max-w-lg">
         <div className="bg-card border border-border rounded-xl shadow-lg p-8 space-y-6">
           {/* Header */}
           <div className="text-center">
@@ -288,41 +316,86 @@ function AdminSetup({ envReady, schemaReady }: { envReady: boolean; schemaReady:
             </p>
           </div>
 
-          {/* Checklist */}
+          {/* Diagnostic Panel */}
           <div className="p-4 border border-border rounded-lg bg-muted/30 space-y-3">
-            <h2 className="font-medium text-sm uppercase tracking-wide text-muted-foreground">Checklist</h2>
-            <ul className="space-y-2 text-sm">
-              <li className="flex items-center gap-3">
-                <StatusIcon ok={envReady} />
-                <span className={envReady ? "text-foreground" : "text-muted-foreground"}>
-                  Environment variables set
-                </span>
-              </li>
-              <li className="flex items-center gap-3">
-                <StatusIcon ok={schemaReady} />
-                <span className={schemaReady ? "text-foreground" : "text-muted-foreground"}>
-                  Database schema initialized
-                </span>
-              </li>
-              <li className="flex items-center gap-3">
-                <XCircle className="w-4 h-4 text-muted-foreground" />
-                <span className="text-muted-foreground">Auth user created</span>
-              </li>
-              <li className="flex items-center gap-3">
-                <XCircle className="w-4 h-4 text-muted-foreground" />
-                <span className="text-muted-foreground">Bootstrap token initialized</span>
-              </li>
-            </ul>
+            <h2 className="font-medium text-sm uppercase tracking-wide text-muted-foreground flex items-center gap-2">
+              <Database className="w-4 h-4" />
+              Connection Status
+            </h2>
+            
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center justify-between gap-3 py-1.5 border-b border-border">
+                <div className="flex items-center gap-2">
+                  <Server className="w-4 h-4 text-muted-foreground" />
+                  <span>Environment Variables</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <StatusIcon ok={envReady} />
+                  <span className={envReady ? "text-green-600" : "text-red-500"}>
+                    {envReady ? "Configured" : "Missing"}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="flex items-center justify-between gap-3 py-1.5 border-b border-border">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-muted-foreground" />
+                  <span>Supabase Connection</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <StatusIcon ok={connected} />
+                  <span className={connected ? "text-green-600" : "text-red-500"}>
+                    {connected ? "Connected" : "Not Connected"}
+                  </span>
+                </div>
+              </div>
+              
+              <div className="flex items-center justify-between gap-3 py-1.5">
+                <div className="flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-muted-foreground" />
+                  <span>Database Schema</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <StatusIcon ok={schemaReady} />
+                  <span className={schemaReady ? "text-green-600" : "text-red-500"}>
+                    {schemaReady ? "Initialized" : "Not Initialized"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Error message */}
+            {error && (
+              <div className="mt-3 p-3 rounded bg-destructive/10 border border-destructive/20">
+                <p className="text-xs text-destructive font-mono break-all">{error}</p>
+              </div>
+            )}
           </div>
+
+          {/* Missing env vars detail */}
+          {!envReady && diagnostics?.envDetails.missingVars && (
+            <div className="p-3 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800">
+              <p className="text-sm font-medium text-amber-800 dark:text-amber-200 mb-2">
+                Missing Environment Variables:
+              </p>
+              <ul className="space-y-1">
+                {diagnostics.envDetails.missingVars.map(v => (
+                  <li key={v} className="text-xs font-mono text-amber-700 dark:text-amber-300">
+                    • {v}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           {/* Instructions */}
           <div className="space-y-3 text-sm">
-            <h2 className="font-medium">Next Steps</h2>
+            <h2 className="font-medium">Setup Steps</h2>
             <ol className="space-y-2 list-decimal list-inside text-muted-foreground">
               {!envReady && (
                 <li>
                   Set <code className="bg-muted px-1.5 py-0.5 rounded text-xs">VITE_SUPABASE_URL</code> and{" "}
-                  <code className="bg-muted px-1.5 py-0.5 rounded text-xs">VITE_SUPABASE_ANON_KEY</code>
+                  <code className="bg-muted px-1.5 py-0.5 rounded text-xs">VITE_SUPABASE_ANON_KEY</code> in your environment
                 </li>
               )}
               {!schemaReady && (
@@ -330,18 +403,29 @@ function AdminSetup({ envReady, schemaReady }: { envReady: boolean; schemaReady:
                   Run <code className="bg-muted px-1.5 py-0.5 rounded text-xs">docs/sql/000_all.sql</code> in Supabase SQL Editor
                 </li>
               )}
-              <li>Create a user in Supabase Auth</li>
-              <li>Sign in and complete bootstrap</li>
+              <li>Create a user in Supabase Auth → Users</li>
+              <li>Sign in here and complete bootstrap</li>
             </ol>
           </div>
 
           {/* Actions */}
-          <Button asChild variant="outline" className="w-full gap-2">
-            <Link to="/">
-              <ArrowLeft className="w-4 h-4" />
-              Back to Site
-            </Link>
-          </Button>
+          <div className="flex gap-3">
+            <Button 
+              onClick={handleRetry} 
+              disabled={retrying}
+              className="flex-1 gap-2"
+            >
+              {retrying ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4" />
+              )}
+              Retry Connection
+            </Button>
+            <Button asChild variant="outline" className="flex-1">
+              <Link to="/">Back to Site</Link>
+            </Button>
+          </div>
         </div>
       </div>
     </div>

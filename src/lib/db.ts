@@ -4,7 +4,7 @@
 // NO DEMO DATA - Supabase is the single source of truth
 // =============================================================================
 
-import { getSupabase, hasSupabaseEnv } from './supabaseClient';
+import { getSupabase, hasSupabaseEnv, getEnvStatus, checkSupabaseConnection } from './supabaseClient';
 import { defaultSiteSettings } from './defaultSiteSettings';
 import type {
   ApiResponse,
@@ -36,7 +36,7 @@ import {
 } from './runtime';
 
 // Re-export for convenience
-export { supabaseReady, hasSupabaseEnv } from './supabaseClient';
+export { supabaseReady, hasSupabaseEnv, getEnvStatus, checkSupabaseConnection } from './supabaseClient';
 
 // -----------------------------------------------------------------------------
 // Simple in-memory cache
