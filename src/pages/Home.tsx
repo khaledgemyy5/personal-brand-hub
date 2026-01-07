@@ -1,13 +1,12 @@
 import { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Mail, Linkedin, Calendar, Download, Briefcase, Lightbulb, Users } from "lucide-react";
+import { ArrowRight, Mail, Linkedin, Calendar, Download, Briefcase, Lightbulb, Users, RefreshCw, AlertCircle } from "lucide-react";
 import { getSiteSettings, getPublishedProjects, getWritingItems, trackEvent } from "@/lib/db";
-import { demoExperience, demoMethodology } from "@/lib/demoData";
 import type { SiteSettings, ProjectListItem, WritingListItem, HomeSectionConfig } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 
-// Default home sections for fallback
+// Default home sections for initial render
 const defaultHomeSections: HomeSectionConfig[] = [
   { id: 'hero', visible: true, order: 1 },
   { id: 'experience_snapshot', visible: true, order: 2 },
@@ -22,6 +21,7 @@ export default function Home() {
   const [projects, setProjects] = useState<ProjectListItem[]>([]);
   const [writing, setWriting] = useState<WritingListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Sorted visible sections
   const visibleSections = useMemo(() => {
@@ -31,42 +31,48 @@ export default function Home() {
       .sort((a, b) => a.order - b.order);
   }, [settings]);
 
-  useEffect(() => {
-    async function loadData() {
-      setLoading(true);
-      
-      const [settingsRes, projectsRes, writingRes] = await Promise.all([
-        getSiteSettings(),
-        getPublishedProjects({ limit: 3 }),
-        getWritingItems({ featuredOnly: true, limit: 3 }),
-      ]);
+  const loadData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    const [settingsRes, projectsRes, writingRes] = await Promise.all([
+      getSiteSettings(),
+      getPublishedProjects({ limit: 3 }),
+      getWritingItems({ featuredOnly: true, limit: 3 }),
+    ]);
 
-      const loadedSettings = settingsRes.data;
-      setSettings(loadedSettings);
-
-      if (projectsRes.data) {
-        setProjects(projectsRes.data.filter(p => p.featured));
-      }
-      if (writingRes.data) {
-        setWriting(writingRes.data);
-      }
-
+    if (settingsRes.error) {
+      setError(settingsRes.error);
       setLoading(false);
-      trackEvent({ event: "page_view", path: "/" });
+      return;
     }
 
+    setSettings(settingsRes.data);
+
+    if (projectsRes.data) {
+      setProjects(projectsRes.data.filter(p => p.featured));
+    }
+    if (writingRes.data) {
+      setWriting(writingRes.data);
+    }
+
+    setLoading(false);
+    trackEvent({ event: "page_view", path: "/" });
+  };
+
+  useEffect(() => {
     loadData();
   }, []);
 
-  const seoTitle = settings?.seo.title || 'Ammar Jaber';
-  const seoDescription = settings?.seo.description || 'Technical Product Manager (ex‑LLM / Software Engineer)';
+  const seoTitle = settings?.seo.title || 'Portfolio';
+  const seoDescription = settings?.seo.description || 'Personal portfolio';
 
   const renderSection = (section: HomeSectionConfig) => {
     switch (section.id) {
       case "hero":
         return <HeroSection key="hero" settings={settings} />;
       case "experience_snapshot":
-        return <ExperienceSnapshotSection key="experience_snapshot" />;
+        return <ExperienceSnapshotSection key="experience_snapshot" settings={settings} />;
       case "featured_projects":
         if (projects.length === 0) return null;
         return <FeaturedProjectsSection key="featured_projects" projects={projects} />;
@@ -89,6 +95,26 @@ export default function Home() {
           <div className="h-16 bg-muted rounded w-3/4" />
           <div className="h-6 bg-muted rounded w-1/2" />
           <div className="h-32 bg-muted rounded" />
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="container-narrow py-16 md:py-24">
+        <div className="text-center space-y-6">
+          <div className="w-16 h-16 rounded-full bg-destructive/10 flex items-center justify-center mx-auto">
+            <AlertCircle className="w-8 h-8 text-destructive" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-serif font-medium mb-2">Unable to Load</h1>
+            <p className="text-muted-foreground max-w-md mx-auto">{error}</p>
+          </div>
+          <Button onClick={loadData} variant="outline" className="gap-2">
+            <RefreshCw className="w-4 h-4" />
+            Retry
+          </Button>
         </div>
       </div>
     );
@@ -117,13 +143,13 @@ function HeroSection({ settings }: { settings: SiteSettings | null }) {
   return (
     <section className="mb-20 md:mb-28">
       <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif font-medium tracking-tight mb-6">
-        {seo?.title || "Ammar Jaber"}
+        {seo?.title || "Welcome"}
       </h1>
       <p className="text-xl md:text-2xl text-muted-foreground mb-4">
         Technical Product Manager
       </p>
       <p className="text-lg text-muted-foreground max-w-xl leading-relaxed mb-10">
-        {seo?.description || "Building products that solve real problems. Previously software engineer and LLM developer."}
+        {seo?.description || "Building products that solve real problems."}
       </p>
       <div className="flex flex-wrap items-center gap-4">
         {resumeEnabled && (
@@ -145,12 +171,19 @@ function HeroSection({ settings }: { settings: SiteSettings | null }) {
   );
 }
 
-function ExperienceSnapshotSection() {
+function ExperienceSnapshotSection({ settings }: { settings: SiteSettings | null }) {
+  // Get experience from settings if available
+  const experience = (settings?.pages as { experience?: Array<{ role: string; company: string; period: string; description?: string }> })?.experience;
+  
+  if (!experience || experience.length === 0) {
+    return null;
+  }
+
   return (
     <section className="mb-20 md:mb-28">
       <h2 className="text-2xl font-serif font-medium mb-8">Experience</h2>
       <div className="space-y-8">
-        {demoExperience.map((exp, i) => (
+        {experience.map((exp, i) => (
           <div key={i} className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-8">
             <span className="text-sm text-muted-foreground shrink-0 w-32">
               {exp.period}
@@ -220,14 +253,20 @@ function FeaturedProjectsSection({ projects }: { projects: ProjectListItem[] }) 
 }
 
 function HowIWorkSection({ settings }: { settings: SiteSettings | null }) {
-  // Check for methodology in pages config
-  const methodology = (settings?.pages as { methodology?: string[] })?.methodology ?? demoMethodology;
+  // Get methodology from settings if available
+  const methodology = (settings?.pages as { methodology?: string[] })?.methodology;
   
+  if (!methodology || methodology.length === 0) {
+    return null;
+  }
+
   const principles = [
-    { icon: Briefcase, title: 'Start with why', description: methodology[0] || 'Every product decision ties back to user value.' },
-    { icon: Lightbulb, title: 'Ship fast, learn faster', description: methodology[1] || 'Small iterations, measurable outcomes.' },
-    { icon: Users, title: 'Build bridges', description: methodology[3] || 'Great products need engineers, designers, and stakeholders aligned.' },
-  ];
+    { icon: Briefcase, title: 'Start with why', description: methodology[0] || '' },
+    { icon: Lightbulb, title: 'Ship fast, learn faster', description: methodology[1] || '' },
+    { icon: Users, title: 'Build bridges', description: methodology[3] || methodology[2] || '' },
+  ].filter(p => p.description);
+
+  if (principles.length === 0) return null;
 
   return (
     <section className="mb-20 md:mb-28">
@@ -307,6 +346,11 @@ function ContactCtaSection({ settings }: { settings: SiteSettings | null }) {
   const email = contactConfig?.email;
   const linkedin = contactConfig?.linkedin;
   const calendar = contactConfig?.calendar;
+
+  // If no contact info configured, don't show section
+  if (!email && !linkedin && !calendar) {
+    return null;
+  }
 
   const handleContactClick = (type: string) => {
     trackEvent({ event: "contact_click", path: `/${type}` });
