@@ -12,12 +12,18 @@ interface ExtendedContactConfig extends ContactPageConfig {
 export default function Contact() {
   const [loading, setLoading] = useState(true);
   const [config, setConfig] = useState<ExtendedContactConfig | null>(null);
+  const [pageDisabled, setPageDisabled] = useState(false);
 
   useEffect(() => {
     async function loadSettings() {
       const res = await getSiteSettings();
       if (res.data?.pages?.contact) {
-        setConfig(res.data.pages.contact as ExtendedContactConfig);
+        const contactConfig = res.data.pages.contact as ExtendedContactConfig;
+        setConfig(contactConfig);
+        // Check if page is explicitly disabled
+        if (contactConfig.enabled === false) {
+          setPageDisabled(true);
+        }
       }
       setLoading(false);
     }
@@ -40,6 +46,21 @@ export default function Contact() {
           <Skeleton className="h-16 w-full max-w-md" />
         </div>
       </div>
+    );
+  }
+
+  // Show polite message if page is disabled
+  if (pageDisabled) {
+    return (
+      <>
+        <title>Contact - Ammar</title>
+        <div className="container-narrow section-spacing">
+          <h1 className="mb-4">Contact</h1>
+          <p className="text-muted-foreground">
+            This page is currently unavailable. Please check back later.
+          </p>
+        </div>
+      </>
     );
   }
 

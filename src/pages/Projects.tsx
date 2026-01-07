@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo, memo, useCallback } from "react";
 import { Link } from "react-router-dom";
+import { Lock, Lightbulb } from "lucide-react";
 import { getPublishedProjects, trackEvent } from "@/lib/db";
-import type { ProjectListItem } from "@/lib/types";
+import type { ProjectListItem, ProjectStatus } from "@/lib/types";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 
@@ -106,6 +107,7 @@ export default function Projects() {
                 summary={project.summary}
                 tags={project.tags}
                 featured={project.featured}
+                status={project.status}
                 slug={project.slug}
                 onClick={() => handleProjectClick(project.slug)}
               />
@@ -122,6 +124,7 @@ const ProjectItem = memo(function ProjectItem({
   summary,
   tags,
   featured,
+  status,
   slug,
   onClick,
 }: {
@@ -129,9 +132,13 @@ const ProjectItem = memo(function ProjectItem({
   summary: string;
   tags: string[];
   featured: boolean;
+  status: ProjectStatus;
   slug: string;
   onClick: () => void;
 }) {
+  const isConfidential = status === "CONFIDENTIAL";
+  const isConcept = status === "CONCEPT";
+
   return (
     <Link
       to={`/projects/${slug}`}
@@ -139,15 +146,31 @@ const ProjectItem = memo(function ProjectItem({
       className="block p-6 -mx-6 rounded-lg card-hover border border-transparent hover:border-border"
     >
       <div className="flex items-start justify-between gap-4 mb-3">
-        <h2 className="font-serif text-xl font-medium">{title}</h2>
-        {featured && (
-          <Badge variant="secondary" className="shrink-0">
-            Featured
-          </Badge>
-        )}
+        <div className="flex items-center gap-2">
+          {isConfidential && (
+            <Lock className="w-4 h-4 text-muted-foreground shrink-0" aria-label="Confidential project" />
+          )}
+          <h2 className="font-serif text-xl font-medium" dir="auto">{title}</h2>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {isConcept && (
+            <Badge variant="outline" className="gap-1">
+              <Lightbulb className="w-3 h-3" />
+              Concept
+            </Badge>
+          )}
+          {isConfidential && (
+            <Badge variant="secondary">Confidential</Badge>
+          )}
+          {featured && !isConfidential && !isConcept && (
+            <Badge variant="secondary">Featured</Badge>
+          )}
+        </div>
       </div>
 
-      <p className="text-muted-foreground mb-4">{summary}</p>
+      <p className="text-muted-foreground mb-4" dir="auto">
+        {isConfidential ? summary.slice(0, 150) + (summary.length > 150 ? '…' : '') : summary}
+      </p>
 
       {tags && tags.length > 0 && (
         <div className="flex flex-wrap gap-2">

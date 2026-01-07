@@ -99,6 +99,7 @@ export default function Resume() {
   const [loading, setLoading] = useState(true);
   const [resumeConfig, setResumeConfig] = useState<ExtendedResumeConfig | null>(null);
   const [resumeData, setResumeData] = useState<ResumeData>(defaultResumeData);
+  const [pageDisabled, setPageDisabled] = useState(false);
 
   useEffect(() => {
     async function loadSettings() {
@@ -106,6 +107,11 @@ export default function Resume() {
       if (res.data?.pages?.resume) {
         const config = res.data.pages.resume as ExtendedResumeConfig;
         setResumeConfig(config);
+        
+        // Check if page is explicitly disabled
+        if (config.enabled === false) {
+          setPageDisabled(true);
+        }
         
         // If content exists in settings, use it
         if (config.content) {
@@ -151,6 +157,23 @@ export default function Resume() {
         <Skeleton className="h-4 w-full mb-2" />
         <Skeleton className="h-4 w-3/4" />
       </main>
+    );
+  }
+
+  // Show polite message if page is disabled
+  if (pageDisabled) {
+    return (
+      <>
+        <title>Resume - Ammar</title>
+        <main className="container-narrow py-16 md:py-24">
+          <h1 className="font-serif text-4xl md:text-5xl font-medium tracking-tight mb-4">
+            Resume
+          </h1>
+          <p className="text-muted-foreground">
+            This page is currently unavailable. Please check back later.
+          </p>
+        </main>
+      </>
     );
   }
 

@@ -10,6 +10,8 @@ export function PublicLayout() {
   const [navConfig, setNavConfig] = useState<NavConfig | null>(null);
   const [hasProjects, setHasProjects] = useState<boolean | null>(null);
   const [hasWriting, setHasWriting] = useState<boolean | null>(null);
+  const [resumeEnabled, setResumeEnabled] = useState(true);
+  const [contactEnabled, setContactEnabled] = useState(true);
 
   useEffect(() => {
     async function loadNavData() {
@@ -20,9 +22,14 @@ export function PublicLayout() {
       ]);
 
       // getSiteSettings now always returns data (defaults on error)
-      setNavConfig(settingsRes.data?.nav_config ?? defaultSiteSettings.nav_config);
+      const settings = settingsRes.data;
+      setNavConfig(settings?.nav_config ?? defaultSiteSettings.nav_config);
       setHasProjects((projectsRes.data?.length ?? 0) > 0);
       setHasWriting((writingRes.data?.length ?? 0) > 0);
+      
+      // Check if resume/contact pages are enabled
+      setResumeEnabled(settings?.pages?.resume?.enabled !== false);
+      setContactEnabled(settings?.pages?.contact?.enabled !== false);
     }
 
     loadNavData();
@@ -30,7 +37,13 @@ export function PublicLayout() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Nav navConfig={navConfig} hasProjects={hasProjects} hasWriting={hasWriting} />
+      <Nav 
+        navConfig={navConfig} 
+        hasProjects={hasProjects} 
+        hasWriting={hasWriting}
+        resumeEnabled={resumeEnabled}
+        contactEnabled={contactEnabled}
+      />
       <main className="flex-1">
         <Outlet />
       </main>
