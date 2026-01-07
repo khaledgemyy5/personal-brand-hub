@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import { Loader2, Plus, Trash2, ChevronUp, ChevronDown, Save, Upload, CheckCircle, XCircle, AlertTriangle } from "lucide-react";
+import { Loader2, Plus, Trash2, ChevronUp, ChevronDown, Save, Upload, CheckCircle, XCircle, AlertTriangle, Database } from "lucide-react";
 import { adminGetSiteSettings, adminUpdateSiteSettings, supabaseReady } from "@/lib/db";
 import { getSupabase } from "@/lib/supabaseClient";
 import type {
@@ -38,6 +38,7 @@ export default function AdminSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [seeding, setSeeding] = useState(false);
   const [settings, setSettings] = useState<SiteSettings | null>(null);
   const [settingsError, setSettingsError] = useState<string | null>(null);
 
@@ -189,6 +190,53 @@ export default function AdminSettings() {
     }
   };
 
+  const handleSeedDemo = async () => {
+    const supabase = getSupabase();
+    if (!supabase) {
+      toast({ title: "Supabase not configured", variant: "destructive" });
+      return;
+    }
+
+    setSeeding(true);
+    try {
+      const { data, error } = await supabase.rpc('admin_seed_demo');
+      
+      if (error) {
+        toast({ 
+          title: "Seed failed", 
+          description: error.message.includes('does not exist') 
+            ? "Run docs/sql/003_seed.sql first to create the seed function."
+            : sanitizeErrorMessage(error),
+          variant: "destructive" 
+        });
+      } else if (data?.success) {
+        const msg = [
+          data.projects_inserted > 0 ? `${data.projects_inserted} projects` : null,
+          data.categories_inserted > 0 ? `${data.categories_inserted} categories` : null,
+          data.items_inserted > 0 ? `${data.items_inserted} writing items` : null,
+        ].filter(Boolean).join(', ');
+        
+        toast({ 
+          title: "Demo content seeded!", 
+          description: msg || "Content already exists (no duplicates created).",
+        });
+      } else {
+        toast({ 
+          title: "Seed failed", 
+          description: data?.error || "Unknown error", 
+          variant: "destructive" 
+        });
+      }
+    } catch (e) {
+      toast({ 
+        title: "Seed failed", 
+        description: e instanceof Error ? e.message : "Unknown error",
+        variant: "destructive" 
+      });
+    }
+    setSeeding(false);
+  };
+
   const StatusIcon = ({ ok }: { ok: boolean }) => 
     ok ? <CheckCircle className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-red-500" />;
 
@@ -248,10 +296,21 @@ export default function AdminSettings() {
           <h1 className="text-2xl font-serif font-medium mb-2">Settings</h1>
           <p className="text-muted-foreground">Manage site configuration.</p>
         </div>
-        <Button onClick={handleSave} disabled={saving || !canEdit} className="gap-2">
-          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-          Save Changes
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            onClick={handleSeedDemo} 
+            disabled={seeding || !canEdit} 
+            className="gap-2"
+          >
+            {seeding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Database className="w-4 h-4" />}
+            Seed Demo
+          </Button>
+          <Button onClick={handleSave} disabled={saving || !canEdit} className="gap-2">
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save Changes
+          </Button>
+        </div>
       </div>
 
       <Accordion type="multiple" defaultValue={["navigation"]} className="space-y-4">
