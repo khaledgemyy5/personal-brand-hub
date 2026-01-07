@@ -171,9 +171,15 @@ function AdminLogin() {
   );
 }
 
+// Simple status icon component to avoid ref warnings
+const StatusIcon = ({ ok }: { ok: boolean }) => {
+  if (ok) {
+    return <CheckCircle className="w-4 h-4 text-green-600" />;
+  }
+  return <XCircle className="w-4 h-4 text-red-500" />;
+};
+
 function AdminSetup() {
-  const StatusIcon = ({ ok }: { ok: boolean }) => 
-    ok ? <CheckCircle className="w-4 h-4 text-green-600" /> : <XCircle className="w-4 h-4 text-red-500" />;
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-background">
