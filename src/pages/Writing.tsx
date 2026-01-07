@@ -159,6 +159,7 @@ function WritingItem({
   onClick: () => void;
 }) {
   const showWhy = item.show_why && item.why_this_matters;
+  const isArabic = item.language === 'AR';
 
   return (
     <a
@@ -172,12 +173,17 @@ function WritingItem({
         <div className="flex-1 min-w-0">
           <h3
             className="font-medium group-hover:text-accent transition-colors"
-            dir="auto"
+            dir={isArabic ? 'rtl' : 'ltr'}
+            lang={isArabic ? 'ar' : undefined}
           >
             {item.title}
           </h3>
           {showWhy && (
-            <p className="text-sm text-muted-foreground mt-1" dir="auto">
+            <p 
+              className="text-sm text-muted-foreground mt-1" 
+              dir={isArabic ? 'rtl' : 'ltr'}
+              lang={isArabic ? 'ar' : undefined}
+            >
               {item.why_this_matters}
             </p>
           )}

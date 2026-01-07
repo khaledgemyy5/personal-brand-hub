@@ -17,9 +17,11 @@ interface NavProps {
   navConfig: NavConfig | null;
   hasProjects: boolean | null;
   hasWriting: boolean | null;
+  resumeEnabled?: boolean;
+  contactEnabled?: boolean;
 }
 
-export function Nav({ navConfig, hasProjects, hasWriting }: NavProps) {
+export function Nav({ navConfig, hasProjects, hasWriting, resumeEnabled = true, contactEnabled = true }: NavProps) {
   const location = useLocation();
   const isLoading = navConfig === null && hasProjects === null && hasWriting === null;
 
@@ -32,10 +34,15 @@ export function Nav({ navConfig, hasProjects, hasWriting }: NavProps) {
     if (!link.visible) return false;
     if (link.href === "/projects" && hasProjects === false) return false;
     if (link.href === "/writing" && hasWriting === false) return false;
+    if (link.href === "/contact" && contactEnabled === false) return false;
     return true;
   });
 
-  const showCta = ctaButton?.visible && ctaButton?.href && ctaButton?.label;
+  // Hide resume CTA if resume page is disabled
+  const showCta = ctaButton?.visible && ctaButton?.href && ctaButton?.label && 
+    (ctaButton.href !== '/resume' || resumeEnabled !== false);
+
+  
 
   return (
     <header className="border-b border-border">
